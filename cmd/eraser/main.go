@@ -23,6 +23,7 @@ import (
 	"github.com/eraser-privacy/eraser/internal/history"
 	"github.com/eraser-privacy/eraser/internal/inbox"
 	"github.com/eraser-privacy/eraser/internal/intelligence"
+	"github.com/eraser-privacy/eraser/internal/product"
 	"github.com/eraser-privacy/eraser/internal/template"
 	brokerValidation "github.com/eraser-privacy/eraser/internal/validation"
 	"github.com/eraser-privacy/eraser/internal/web"
@@ -325,6 +326,9 @@ func addBrokerCmd() *cobra.Command {
 
 func serveCmd() *cobra.Command {
 	var port int
+	var bindAddress string
+	var publicURL string
+	var openBrowser bool
 
 	cmd := &cobra.Command{
 		Use:   "serve",
@@ -339,11 +343,30 @@ This opens a visual dashboard where you can:
 
 The server runs locally on your machine - no data is sent to external servers.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runServe(port)
+			settings, err := product.LoadFromEnv()
+			if err != nil {
+				return err
+			}
+			if cmd.Flags().Changed("bind") {
+				settings.BindAddress = bindAddress
+			}
+			if cmd.Flags().Changed("public-url") {
+				settings.PublicURL = publicURL
+			}
+			if cmd.Flags().Changed("open-browser") {
+				settings.OpenBrowser = openBrowser
+			}
+			if err := settings.Validate(); err != nil {
+				return err
+			}
+			return runServe(port, settings)
 		},
 	}
 
 	cmd.Flags().IntVar(&port, "port", 8080, "Port to listen on")
+	cmd.Flags().StringVar(&bindAddress, "bind", "127.0.0.1", "Address to listen on")
+	cmd.Flags().StringVar(&publicURL, "public-url", "", "Externally visible absolute URL")
+	cmd.Flags().BoolVar(&openBrowser, "open-browser", true, "Open the web interface in a browser")
 
 	return cmd
 }
@@ -704,7 +727,7 @@ func runAddBroker() error {
 	return nil
 }
 
-func runServe(port int) error {
+func runServe(port int, productSettings product.Settings) error {
 	configPath := resolveConfigPath()
 	var cfg *config.Config
 	if _, err := os.Stat(configPath); err == nil {
@@ -735,7 +758,7 @@ func runServe(port int) error {
 	}
 
 	// Create and start web server
-	server, err := web.NewServer(port, cfg, configPath, brokerDB, store, tmplEngine)
+	server, err := web.NewServer(port, cfg, configPath, brokerDB, store, tmplEngine, web.WithProductSettings(productSettings))
 	if err != nil {
 		return fmt.Errorf("failed to create web server: %w", err)
 	}

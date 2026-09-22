@@ -27,6 +27,7 @@ import (
 	"github.com/eraser-privacy/eraser/internal/history"
 	"github.com/eraser-privacy/eraser/internal/inbox"
 	"github.com/eraser-privacy/eraser/internal/intelligence"
+	"github.com/eraser-privacy/eraser/internal/product"
 	emaTemplate "github.com/eraser-privacy/eraser/internal/template"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -121,9 +122,10 @@ type Server struct {
 	rateLimiter    *RateLimiter
 	jobManager     *JobManager
 	jobPersistence *JobPersistence
+	product        product.Settings
 }
 
-func NewServer(port int, cfg *config.Config, configPath string, brokerDB *broker.BrokerDatabase, historyStore *history.Store, tmplEngine *emaTemplate.Engine) (*Server, error) {
+func NewServer(port int, cfg *config.Config, configPath string, brokerDB *broker.BrokerDatabase, historyStore *history.Store, tmplEngine *emaTemplate.Engine, options ...ServerOption) (*Server, error) {
 	csrfKey := make([]byte, 32)
 	if _, err := rand.Read(csrfKey); err != nil {
 		return nil, fmt.Errorf("failed to generate CSRF key: %w", err)
@@ -133,6 +135,10 @@ func NewServer(port int, cfg *config.Config, configPath string, brokerDB *broker
 	home, _ := os.UserHomeDir()
 	dataDir := filepath.Join(home, ".eraser")
 
+	productSettings, err := product.LoadFromEnv()
+	if err != nil {
+		return nil, err
+	}
 	s := &Server{
 		config:         cfg,
 		configPath:     configPath,
@@ -145,6 +151,10 @@ func NewServer(port int, cfg *config.Config, configPath string, brokerDB *broker
 		rateLimiter:    NewRateLimiter(defaultRateLimit, defaultRateWindow),
 		jobManager:     NewJobManager(),
 		jobPersistence: NewJobPersistence(dataDir),
+		product:        productSettings,
+	}
+	for _, option := range options {
+		option(s)
 	}
 
 	tmpl, err := s.parseTemplates()
@@ -153,6 +163,12 @@ func NewServer(port int, cfg *config.Config, configPath string, brokerDB *broker
 	}
 	s.templates = tmpl
 	return s, nil
+}
+
+type ServerOption func(*Server)
+
+func WithProductSettings(settings product.Settings) ServerOption {
+	return func(server *Server) { server.product = settings }
 }
 
 // parseTemplates loads and parses all HTML templates
@@ -270,7 +286,7 @@ func (s *Server) Start() error {
 	router := s.setupRouter()
 
 	s.httpServer = &http.Server{
-		Addr:         fmt.Sprintf("127.0.0.1:%d", s.port),
+		Addr:         fmt.Sprintf("%s:%d", s.product.BindAddress, s.port),
 		Handler:      router,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
@@ -281,13 +297,18 @@ func (s *Server) Start() error {
 	s.checkPendingJob()
 
 	// Open browser after a short delay
-	go func() {
-		time.Sleep(500 * time.Millisecond)
-		url := fmt.Sprintf("http://localhost:%d", s.port)
-		openBrowser(url)
-	}()
+	if s.product.OpenBrowser {
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+			browserURL := s.product.PublicURL
+			if browserURL == "" {
+				browserURL = fmt.Sprintf("http://localhost:%d", s.port)
+			}
+			openBrowser(browserURL)
+		}()
+	}
 
-	fmt.Printf("Starting Eraser web UI at http://localhost:%d\n", s.port)
+	fmt.Printf("Starting Eraser %s web UI on %s\n", s.product.Edition, s.httpServer.Addr)
 	fmt.Println("Press Ctrl+C to stop")
 
 	if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -381,21 +402,26 @@ func (s *Server) setupRouter() *chi.Mux {
 	r.Use(middleware.Compress(5))
 	r.Use(securityHeaders)
 
-	// CSRF protection - secure for localhost only
+	// Public URL controls secure cookies and adds its host to trusted origins.
 	csrfMiddleware := csrf.Protect(
 		s.csrfKey,
-		csrf.Secure(false), // Allow HTTP for localhost
+		csrf.Secure(s.product.SecureCookies()),
 		csrf.Path("/"),
 		csrf.HttpOnly(true),
 		csrf.SameSite(csrf.SameSiteLaxMode), // Lax mode for form submissions
 		csrf.RequestHeader("X-CSRF-Token"),  // For HTMX AJAX requests
-		csrf.TrustedOrigins([]string{"localhost", "127.0.0.1", fmt.Sprintf("localhost:%d", s.port), fmt.Sprintf("127.0.0.1:%d", s.port)}),
+		csrf.TrustedOrigins(s.product.TrustedOrigins(s.port)),
 	)
 	r.Use(csrfMiddleware)
 
 	// Static files
 	staticSub, _ := fs.Sub(staticFS, "static")
 	r.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub))))
+
+	// Operational and versioned product routes.
+	r.Get("/healthz", s.handleHealth)
+	r.Get("/readyz", s.handleReady)
+	r.Get("/api/v1/system", s.handleAPISystem)
 
 	// Routes
 	r.Get("/", s.handleDashboard)
@@ -447,6 +473,30 @@ func (s *Server) setupRouter() *chi.Mux {
 	})
 
 	return r
+}
+
+func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"status":"ok"}`))
+}
+
+func (s *Server) handleReady(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if s.historyStore == nil || s.historyStore.Ping() != nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"status":"unavailable"}`))
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"status":"ready"}`))
+}
+
+func (s *Server) handleAPISystem(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(s.product.Info()); err != nil {
+		log.Printf("failed to encode product information: %v", err)
+	}
 }
 
 // securityHeaders adds security headers to all responses

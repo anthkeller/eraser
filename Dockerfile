@@ -3,7 +3,8 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/eraser ./cmd/eraser
+ARG VERSION=dev
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X github.com/eraser-privacy/eraser/internal/product.Version=${VERSION}" -o /out/eraser ./cmd/eraser
 
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates chromium tzdata \

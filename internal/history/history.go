@@ -143,6 +143,10 @@ func NewStore(dbPath string) (*Store, error) {
 	return store, nil
 }
 
+func (s *Store) Ping() error {
+	return s.db.Ping()
+}
+
 func (s *Store) migrate() error {
 	// First, try to add new columns to existing databases
 	// These must run before the index creation below

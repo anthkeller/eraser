@@ -10,7 +10,17 @@ services:
       - ./eraser-data:/home/eraser/.eraser
     environment:
       TZ: America/New_York
+      ERASER_BIND: 0.0.0.0
+      ERASER_OPEN_BROWSER: "false"
+      ERASER_EDITION: community
+      ERASER_DEPLOYMENT: self-hosted
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/readyz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

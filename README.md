@@ -93,6 +93,25 @@ The container runs as an unprivileged user, drops Linux capabilities, and
 persists only the `.eraser` application directory. Chromium is included for
 the existing form-assistance workflow.
 
+The container listens on all container interfaces while native installations
+remain bound to `127.0.0.1` by default. Docker Compose also checks `/readyz` so
+Container Manager can report whether the application database is available.
+
+## Product and deployment modes
+
+Eraser now has explicit `community`, `cloud`, and `commercial` edition metadata
+and `self-hosted` or `hosted` deployment modes. All editions remain single-user.
+The versioned `GET /api/v1/system` endpoint allows future mobile, web, and
+extension clients to discover non-secret capabilities without learning the
+internal owner identifier.
+
+Hosted mode is architectural groundwork, not a production SaaS switch. It
+rejects insecure public URLs, but production hosting still requires OIDC
+authentication, owner-scoped PostgreSQL storage, and external workers. See
+[`docs/commercialization.md`](docs/commercialization.md) for configuration,
+deployment boundaries, and the licensing review required before restricting
+third-party hosted resale.
+
 ## Extensible broker workflows
 
 Existing broker entries require no changes. Eraser infers email removal when
