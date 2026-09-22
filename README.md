@@ -76,6 +76,58 @@ That's the password you'll use in Eraser's setup wizard. Your regular Gmail pass
 
 ## For Developers: CLI Usage
 
+## Run continuously with Docker
+
+The included Compose stack runs the web interface continuously and keeps its
+configuration, history, and pending jobs in `./eraser-data`:
+
+```bash
+docker compose up -d --build
+```
+
+Open `http://your-server:8080` and complete the setup wizard. On Synology,
+place the repository in a Docker share, run the command over SSH, and map port
+8080 through Container Manager or a reverse proxy as needed.
+
+The container runs as an unprivileged user, drops Linux capabilities, and
+persists only the `.eraser` application directory. Chromium is included for
+the existing form-assistance workflow.
+
+## Extensible broker workflows
+
+Existing broker entries require no changes. Eraser infers email removal when
+`email` is present, web-form removal when only `opt_out_url` is present, and a
+manual workflow otherwise. New or specialized entries can opt into the
+adapter model explicitly:
+
+```yaml
+- id: example
+  name: Example Broker
+  website: https://example.com
+  email: privacy@example.com
+  opt_out_url: https://example.com/remove
+  region: us
+  category: people-search
+  workflow:
+    discovery:
+      type: web
+      adapter: example
+      url: https://example.com/search
+    removal:
+      type: web_form # email, web_form, api, or manual
+      adapter: web_form
+      url: https://example.com/remove
+    verification:
+      type: email_link
+    monitoring:
+      interval_days: 30
+```
+
+Email send commands process only email workflows. Form, API, and manual
+workflows are deferred to their respective pipeline stages. Site-specific
+adapters can implement `internal/adapter.Adapter` and be registered alongside
+the built-in adapters.
+
 If you prefer the command line, Eraser has a full CLI.
 
 ### Installation

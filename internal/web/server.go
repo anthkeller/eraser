@@ -18,15 +18,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
-	"github.com/gorilla/csrf"
+	"github.com/eraser-privacy/eraser/internal/adapter"
 	"github.com/eraser-privacy/eraser/internal/broker"
 	"github.com/eraser-privacy/eraser/internal/config"
 	"github.com/eraser-privacy/eraser/internal/email"
 	"github.com/eraser-privacy/eraser/internal/history"
 	"github.com/eraser-privacy/eraser/internal/inbox"
 	emaTemplate "github.com/eraser-privacy/eraser/internal/template"
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+	"github.com/gorilla/csrf"
 )
 
 //go:embed static/*
@@ -36,9 +37,9 @@ var staticFS embed.FS
 var templatesFS embed.FS
 
 const (
-	defaultRateLimit   = 30
-	defaultRateWindow  = time.Minute
-	defaultSessionTTL  = 30 * time.Minute
+	defaultRateLimit  = 30
+	defaultRateWindow = time.Minute
+	defaultSessionTTL = 30 * time.Minute
 )
 
 type RateLimiter struct {
@@ -697,6 +698,12 @@ func (s *Server) handleAPISendOne(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`<span class="text-red-600">Broker not found</span>`))
 		return
 	}
+	action, err := adapter.DefaultRegistry().Plan(*br)
+	if err != nil || action.Method != broker.RemovalEmail {
+		w.WriteHeader(http.StatusConflict)
+		w.Write([]byte(`<span class="text-yellow-600">This broker uses a form or manual removal workflow.</span>`))
+		return
+	}
 
 	if s.config == nil || s.config.Email.Provider == "" {
 		w.WriteHeader(http.StatusBadRequest)
@@ -802,6 +809,15 @@ func (s *Server) handleAPISendAll(w http.ResponseWriter, r *http.Request) {
 	}
 
 	toSend := s.getBrokersWithStatus(search, category, region, status)
+	registry := adapter.DefaultRegistry()
+	emailOnly := toSend[:0]
+	for _, b := range toSend {
+		action, planErr := registry.Plan(b.Broker)
+		if planErr == nil && action.Method == broker.RemovalEmail {
+			emailOnly = append(emailOnly, b)
+		}
+	}
+	toSend = emailOnly
 
 	if len(toSend) == 0 {
 		w.WriteHeader(http.StatusBadRequest)
@@ -1018,9 +1034,9 @@ type Stats struct {
 // BrokerWithStatus combines broker info with history status
 type BrokerWithStatus struct {
 	broker.Broker
-	Status     string // "never", "sent", "failed"
-	LastSent   string // formatted date or empty
-	TotalSent  int
+	Status    string // "never", "sent", "failed"
+	LastSent  string // formatted date or empty
+	TotalSent int
 }
 
 // getBrokersWithStatus returns brokers with their history status
@@ -2498,4 +2514,3 @@ func (s *Server) handleAPIJobCancel(w http.ResponseWriter, r *http.Request) {
 	job.Cancel()
 	json.NewEncoder(w).Encode(map[string]string{"status": "cancelled"})
 }
-

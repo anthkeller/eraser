@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/spf13/cobra"
+	"github.com/eraser-privacy/eraser/internal/adapter"
 	"github.com/eraser-privacy/eraser/internal/broker"
 	"github.com/eraser-privacy/eraser/internal/browser"
 	"github.com/eraser-privacy/eraser/internal/config"
@@ -21,6 +21,7 @@ import (
 	"github.com/eraser-privacy/eraser/internal/inbox"
 	"github.com/eraser-privacy/eraser/internal/template"
 	"github.com/eraser-privacy/eraser/internal/web"
+	"github.com/spf13/cobra"
 )
 
 var (
@@ -294,7 +295,27 @@ func runSend() error {
 		fmt.Println()
 	}
 
-	fmt.Printf("📤 Processing %d brokers...\n", len(brokers))
+	registry := adapter.DefaultRegistry()
+	emailBrokers := brokers[:0]
+	deferredCount := 0
+	for _, b := range brokers {
+		action, planErr := registry.Plan(b)
+		if planErr != nil || action.Method != broker.RemovalEmail {
+			deferredCount++
+			continue
+		}
+		emailBrokers = append(emailBrokers, b)
+	}
+	brokers = emailBrokers
+	if deferredCount > 0 {
+		fmt.Printf("ℹ️  Deferred %d brokers to form/manual workflows\n", deferredCount)
+	}
+	if len(brokers) == 0 {
+		fmt.Println("No brokers support email removal for this command.")
+		return nil
+	}
+
+	fmt.Printf("📤 Processing %d email brokers...\n", len(brokers))
 	fmt.Println()
 
 	successCount := 0

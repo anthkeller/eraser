@@ -1,0 +1,16 @@
+services:
+  eraser:
+    build:
+      context: .
+    container_name: eraser
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./eraser-data:/home/eraser/.eraser
+    environment:
+      TZ: America/New_York
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL

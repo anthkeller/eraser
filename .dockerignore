@@ -1,0 +1,7 @@
+.git
+.github
+eraser
+*.db
+*.log
+config.yaml
+eraser-data

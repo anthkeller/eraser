@@ -32,16 +32,76 @@ func sanitizeBroker(b *Broker) {
 }
 
 type Broker struct {
-	ID          string   `yaml:"id"`
-	Name        string   `yaml:"name"`
-	Email       string   `yaml:"email"`
-	Website     string   `yaml:"website,omitempty"`
-	OptOutURL   string   `yaml:"opt_out_url,omitempty"`
-	Region      string   `yaml:"region"` // "us", "eu", "global"
-	Category    string   `yaml:"category,omitempty"` // "people-search", "marketing", "background-check", etc.
-	Notes       string   `yaml:"notes,omitempty"`
-	RequiresID  bool     `yaml:"requires_id,omitempty"` // If they require ID verification
-	Tags        []string `yaml:"tags,omitempty"`
+	ID         string   `yaml:"id"`
+	Name       string   `yaml:"name"`
+	Email      string   `yaml:"email"`
+	Website    string   `yaml:"website,omitempty"`
+	OptOutURL  string   `yaml:"opt_out_url,omitempty"`
+	Region     string   `yaml:"region"`             // "us", "eu", "global"
+	Category   string   `yaml:"category,omitempty"` // "people-search", "marketing", "background-check", etc.
+	Notes      string   `yaml:"notes,omitempty"`
+	RequiresID bool     `yaml:"requires_id,omitempty"` // If they require ID verification
+	Tags       []string `yaml:"tags,omitempty"`
+	Workflow   Workflow `yaml:"workflow,omitempty"`
+}
+
+// Workflow describes how Eraser discovers, removes, verifies, and monitors a
+// record. It is optional so the existing broker database remains compatible.
+// When removal.type is omitted, Eraser infers email, web_form, or manual from
+// the broker's legacy email and opt_out_url fields.
+type Workflow struct {
+	Discovery    WorkflowStep `yaml:"discovery,omitempty"`
+	Removal      WorkflowStep `yaml:"removal,omitempty"`
+	Verification WorkflowStep `yaml:"verification,omitempty"`
+	Monitoring   Monitoring   `yaml:"monitoring,omitempty"`
+}
+
+type WorkflowStep struct {
+	Type    string `yaml:"type,omitempty"`
+	Adapter string `yaml:"adapter,omitempty"`
+	URL     string `yaml:"url,omitempty"`
+}
+
+type Monitoring struct {
+	IntervalDays int    `yaml:"interval_days,omitempty"`
+	Adapter      string `yaml:"adapter,omitempty"`
+}
+
+const (
+	RemovalEmail   = "email"
+	RemovalWebForm = "web_form"
+	RemovalAPI     = "api"
+	RemovalManual  = "manual"
+)
+
+// RemovalMethod returns the explicit removal method or a legacy-compatible
+// inferred method.
+func (b Broker) RemovalMethod() string {
+	if b.Workflow.Removal.Type != "" {
+		return strings.ToLower(b.Workflow.Removal.Type)
+	}
+	if b.Email != "" {
+		return RemovalEmail
+	}
+	if b.OptOutURL != "" {
+		return RemovalWebForm
+	}
+	return RemovalManual
+}
+
+// RemovalTarget returns the endpoint used by the selected removal method.
+func (b Broker) RemovalTarget() string {
+	if b.Workflow.Removal.URL != "" {
+		return b.Workflow.Removal.URL
+	}
+	switch b.RemovalMethod() {
+	case RemovalEmail:
+		return b.Email
+	case RemovalWebForm, RemovalAPI:
+		return b.OptOutURL
+	default:
+		return ""
+	}
 }
 
 type BrokerDatabase struct {
