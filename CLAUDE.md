@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Eraser is an open-source CLI tool that automatically sends data removal requests to data brokers. It's a free alternative to paid services like Incogni and DeleteMe. Users provide their personal information, and the tool sends GDPR, CCPA, or generic removal request emails to 750+ data brokers.
+Eraser is an open-source CLI tool that automatically sends data removal requests to data brokers. It's a free alternative to paid services like Incogni and DeleteMe. Users provide their personal information, and the tool tracks 1,200+ broker workflows and sends GDPR, CCPA, or generic removal requests where email delivery is supported.
 
 ## Tech Stack
 
@@ -31,7 +31,8 @@ eraser/
 │           ├── gdpr.tmpl
 │           ├── ccpa.tmpl
 │           └── generic.tmpl
-├── data/brokers.yaml        # 750+ data broker database
+├── data/brokers.yaml        # Curated data broker database
+├── data/registry-brokers.yaml # Normalized public registry records
 └── .github/workflows/       # GitHub Actions for monthly automation
 ```
 
@@ -55,7 +56,7 @@ Three email templates are available:
 
 ### Flow
 1. Load user config from `~/.eraser/config.yaml`
-2. Load brokers from `data/brokers.yaml`
+2. Load and merge broker YAML fragments from `data/`
 3. Filter by region and exclusions
 4. For each broker, render email template with user + broker data
 5. Send via SMTP or SendGrid
@@ -101,7 +102,7 @@ Brokers are defined in `data/brokers.yaml`. Required fields:
   category: marketing
 ```
 
-The broker database now includes 750+ brokers from the Privacy Rights Clearinghouse registry.
+The merged catalog includes 1,200+ curated and state-registry-backed broker records.
 
 ## Code Patterns
 
@@ -117,7 +118,8 @@ The broker database now includes 750+ brokers from the Privacy Rights Clearingho
 | `cmd/eraser/main.go` | All CLI commands and main logic |
 | `internal/broker/broker.go` | Broker type and database operations |
 | `internal/template/template.go` | Email template rendering |
-| `data/brokers.yaml` | Data broker database (750+ entries) |
+| `data/brokers.yaml` | Curated broker records |
+| `data/registry-brokers.yaml` | Generated state-registry records and provenance |
 | `config.example.yaml` | Example user configuration |
 
 ## Security Notes

@@ -32,17 +32,26 @@ func sanitizeBroker(b *Broker) {
 }
 
 type Broker struct {
-	ID         string   `yaml:"id"`
-	Name       string   `yaml:"name"`
-	Email      string   `yaml:"email"`
-	Website    string   `yaml:"website,omitempty"`
-	OptOutURL  string   `yaml:"opt_out_url,omitempty"`
-	Region     string   `yaml:"region"`             // "us", "eu", "global"
-	Category   string   `yaml:"category,omitempty"` // "people-search", "marketing", "background-check", etc.
-	Notes      string   `yaml:"notes,omitempty"`
-	RequiresID bool     `yaml:"requires_id,omitempty"` // If they require ID verification
-	Tags       []string `yaml:"tags,omitempty"`
-	Workflow   Workflow `yaml:"workflow,omitempty"`
+	ID          string            `yaml:"id"`
+	Name        string            `yaml:"name"`
+	Email       string            `yaml:"email"`
+	Website     string            `yaml:"website,omitempty"`
+	OptOutURL   string            `yaml:"opt_out_url,omitempty"`
+	Region      string            `yaml:"region"`             // "us", "eu", "global"
+	Category    string            `yaml:"category,omitempty"` // "people-search", "marketing", "background-check", etc.
+	Notes       string            `yaml:"notes,omitempty"`
+	RequiresID  bool              `yaml:"requires_id,omitempty"` // If they require ID verification
+	Tags        []string          `yaml:"tags,omitempty"`
+	Workflow    Workflow          `yaml:"workflow,omitempty"`
+	Sources     []RegistrySource  `yaml:"sources,omitempty"`
+	RiskFlags   []string          `yaml:"risk_flags,omitempty"`
+	RegistryIDs map[string]string `yaml:"registry_ids,omitempty"`
+}
+
+type RegistrySource struct {
+	Registry  string `yaml:"registry"`
+	RecordID  string `yaml:"record_id,omitempty"`
+	UpdatedAt string `yaml:"updated_at,omitempty"`
 }
 
 // Workflow describes how Eraser discovers, removes, verifies, and monitors a
@@ -148,10 +157,84 @@ func LoadFromDir(dir string) (*BrokerDatabase, error) {
 			return nil, fmt.Errorf("failed to load %s: %w", entry.Name(), err)
 		}
 
-		db.Brokers = append(db.Brokers, partialDB.Brokers...)
+		for _, incoming := range partialDB.Brokers {
+			if existing := db.FindByID(incoming.ID); existing != nil {
+				mergeBroker(existing, incoming)
+				continue
+			}
+			db.Brokers = append(db.Brokers, incoming)
+		}
 	}
 
 	return db, nil
+}
+
+func mergeBroker(dst *Broker, src Broker) {
+	if dst.Email == "" {
+		dst.Email = src.Email
+	}
+	if dst.Website == "" {
+		dst.Website = src.Website
+	}
+	if dst.OptOutURL == "" {
+		dst.OptOutURL = src.OptOutURL
+	}
+	if dst.Category == "" {
+		dst.Category = src.Category
+	}
+	if dst.Region == "" {
+		dst.Region = src.Region
+	}
+	dst.RequiresID = dst.RequiresID || src.RequiresID
+	dst.Tags = appendUnique(dst.Tags, src.Tags...)
+	dst.RiskFlags = appendUnique(dst.RiskFlags, src.RiskFlags...)
+	dst.Sources = appendSources(dst.Sources, src.Sources...)
+	if dst.RegistryIDs == nil {
+		dst.RegistryIDs = map[string]string{}
+	}
+	for registry, id := range src.RegistryIDs {
+		if _, exists := dst.RegistryIDs[registry]; !exists {
+			dst.RegistryIDs[registry] = id
+		}
+	}
+}
+
+func appendUnique(dst []string, values ...string) []string {
+	seen := toSet(dst)
+	for _, value := range values {
+		if value != "" && !seen[strings.ToLower(value)] {
+			dst = append(dst, value)
+			seen[strings.ToLower(value)] = true
+		}
+	}
+	return dst
+}
+
+func appendSources(dst []RegistrySource, values ...RegistrySource) []RegistrySource {
+	seen := map[string]bool{}
+	for _, source := range dst {
+		seen[strings.ToLower(source.Registry)+"|"+source.RecordID] = true
+	}
+	for _, source := range values {
+		key := strings.ToLower(source.Registry) + "|" + source.RecordID
+		if source.Registry != "" && !seen[key] {
+			dst = append(dst, source)
+			seen[key] = true
+		}
+	}
+	return dst
+}
+
+// Load accepts either a single YAML file or a directory of YAML fragments.
+func Load(path string) (*BrokerDatabase, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if info.IsDir() {
+		return LoadFromDir(path)
+	}
+	return LoadFromFile(path)
 }
 
 func toSet(items []string) map[string]bool {

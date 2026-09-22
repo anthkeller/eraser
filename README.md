@@ -1,12 +1,12 @@
 # Eraser
 
-Take back your privacy. Eraser sends data removal requests to 750+ data brokers on your behalf—for free.
+Take back your privacy. Eraser tracks removal workflows for 1,200+ data brokers and sends supported removal requests on your behalf—for free.
 
 You know those sites like Spokeo, BeenVerified, and Whitepages that have your home address, phone number, and family members' names? They're called data brokers, and there are hundreds of them. Services like Incogni and DeleteMe charge $100+/year to send opt-out requests to these companies. Eraser does the same thing, but it's open source and completely free.
 
 ### What to Expect
 
-**The good:** Eraser automatically sends removal request emails to 750+ data brokers. Many brokers process these requests automatically—you send the email, they remove your data, done.
+**The good:** Eraser includes 1,200+ broker records and automatically sends removal requests to brokers with verified email contacts. Many brokers process these requests automatically—you send the email, they remove your data, done.
 
 **The reality:** Some brokers require additional steps. They might send you a confirmation link to click, ask you to fill out a form on their website, or request identity verification. Eraser tracks these responses and shows you exactly what needs manual attention.
 
@@ -50,7 +50,7 @@ The wizard walks you through entering your personal information (the data broker
 **Step 4: Send Removal Requests**
 
 From the dashboard, you can:
-- Browse the list of 750+ data brokers
+- Browse the list of 1,200+ data brokers
 - Send requests one at a time or in bulk
 - Track which requests have been sent and their status
 
@@ -196,7 +196,7 @@ go build -o eraser ./cmd/eraser
 | `eraser init` | Interactive config setup |
 | `eraser send` | Send removal requests |
 | `eraser send --dry-run` | Preview without sending |
-| `eraser list-brokers` | Show all 750+ brokers |
+| `eraser list-brokers` | Show all 1,200+ brokers |
 | `eraser status` | View history and stats |
 | `eraser status --limit 50` | Show more history |
 | `eraser add-broker` | Add a custom broker |
@@ -257,9 +257,37 @@ Eraser includes three templates:
 
 The generic template is a good default if you're not sure.
 
+### Registry-backed broker data
+
+Eraser loads every YAML fragment in `data/` and merges matching broker IDs.
+`brokers.yaml` contains the curated base list. `registry-brokers.yaml` adds
+normalized records from the supplied California, Oregon, Oregon DFR, and
+Vermont public registries. The merged catalog currently contains 1,236 unique
+broker IDs, including 1,231 with email contacts and 981 with opt-out URLs.
+
+Registry records retain source name, registration or license ID, source update
+date, proxy opt-out support, and sensitive-data risk flags where supplied. The
+import deliberately matches legal names rather than privacy-portal domains,
+because many unrelated companies share OneTrust and DataGrail hosts.
+
+Rebuild the normalized registry file with:
+
+```bash
+python tools/import_registries.py \
+  --california "California Data Broker Registry 2026.csv" \
+  --oregon "Data Broker Registrationses - 2026-09-22_0147.xlsx" \
+  --oregon-collected dfcs_db_collected.csv \
+  --oregon-optout dfcs_db_optout.csv \
+  --vermont vt-data-brokers.csv
+```
+
+The importer requires PyYAML and openpyxl. Source files are not committed, but
+each generated broker record keeps enough provenance to trace it back to the
+government registry.
+
 ### Adding Brokers
 
-The broker database is at `data/brokers.yaml`. To add one:
+The curated broker database is at `data/brokers.yaml`. To add one:
 
 ```yaml
 - id: example-broker
@@ -336,7 +364,7 @@ Yes, with caveats:
 - **It's not instant.** Brokers have up to 30-45 days to process requests (varies by law). Some are faster.
 - **You'll need to repeat this.** Data brokers buy and sell data continuously. Running Eraser monthly keeps you off their lists.
 
-**The Pipeline view** in Eraser's web UI shows you exactly which brokers need manual attention. It's not fully automated, but it's free—and it does the tedious work of sending 750+ emails and tracking responses for you.
+**The Pipeline view** in Eraser's web UI shows you exactly which brokers need manual attention. It's not fully automated, but it's free—and it handles supported email workflows and tracks responses for you.
 
 ---
 
@@ -344,7 +372,7 @@ Yes, with caveats:
 
 | Service | Price | Brokers | Open Source |
 |---------|-------|---------|-------------|
-| **Eraser** | Free | 750+ | Yes |
+| **Eraser** | Free | 1,200+ | Yes |
 | Incogni | $77/year | 180+ | No |
 | DeleteMe | $129/year | 750+ | No |
 | Privacy Duck | $500+/year | 500+ | No |
@@ -374,7 +402,8 @@ eraser/
 │   ├── history/             # SQLite request tracking
 │   ├── template/            # Email template rendering
 │   └── web/                 # Web UI server and handlers
-├── data/brokers.yaml        # 750+ broker database
+├── data/brokers.yaml        # Curated broker database
+├── data/registry-brokers.yaml # Normalized public registry records
 └── config.example.yaml      # Example configuration
 ```
 

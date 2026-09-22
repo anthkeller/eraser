@@ -35,11 +35,11 @@ func resolveBrokerPath() string {
 	if brokerFile != "" {
 		return brokerFile
 	}
-	if _, err := os.Stat("data/brokers.yaml"); err == nil {
-		return "data/brokers.yaml"
+	if _, err := os.Stat("data/registry-brokers.yaml"); err == nil {
+		return "data"
 	}
 	exe, _ := os.Executable()
-	return filepath.Join(filepath.Dir(exe), "data", "brokers.yaml")
+	return filepath.Join(filepath.Dir(exe), "data")
 }
 
 func resolveConfigPath() string {
@@ -62,7 +62,7 @@ send via Gmail SMTP.`,
 
 	// Global flags
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.eraser/config.yaml)")
-	rootCmd.PersistentFlags().StringVar(&brokerFile, "brokers", "", "broker database file (default is ./data/brokers.yaml)")
+	rootCmd.PersistentFlags().StringVar(&brokerFile, "brokers", "", "broker database YAML file or directory (default is ./data)")
 
 	// Add commands
 	rootCmd.AddCommand(initCmd())
@@ -321,7 +321,7 @@ func runSend() error {
 		cfg.Options.DryRun = true
 	}
 
-	brokerDB, err := broker.LoadFromFile(resolveBrokerPath())
+	brokerDB, err := broker.Load(resolveBrokerPath())
 	if err != nil {
 		return fmt.Errorf("failed to load brokers: %w", err)
 	}
@@ -458,7 +458,7 @@ func runSend() error {
 }
 
 func runListBrokers() error {
-	brokerDB, err := broker.LoadFromFile(resolveBrokerPath())
+	brokerDB, err := broker.Load(resolveBrokerPath())
 	if err != nil {
 		return fmt.Errorf("failed to load brokers: %w", err)
 	}
@@ -606,7 +606,7 @@ func runServe(port int) error {
 		}
 	}
 
-	brokerDB, err := broker.LoadFromFile(resolveBrokerPath())
+	brokerDB, err := broker.Load(resolveBrokerPath())
 	if err != nil {
 		return fmt.Errorf("failed to load brokers: %w", err)
 	}
@@ -722,7 +722,7 @@ func runMonitor(days int, once bool, watch bool) error {
 	}
 
 	// Load brokers for domain matching
-	brokerDB, err := broker.LoadFromFile(resolveBrokerPath())
+	brokerDB, err := broker.Load(resolveBrokerPath())
 	if err != nil {
 		return fmt.Errorf("failed to load brokers: %w", err)
 	}
@@ -1303,7 +1303,7 @@ Safety features:
 
 func runConfirm(confirmURL, brokerID string, pending, validateDomain, dryRun bool) error {
 	// Load brokers for domain validation
-	brokerDB, err := broker.LoadFromFile(resolveBrokerPath())
+	brokerDB, err := broker.Load(resolveBrokerPath())
 	if err != nil {
 		return fmt.Errorf("failed to load brokers: %w", err)
 	}
@@ -1539,7 +1539,7 @@ func runExposureScan(brokerID string, dueOnly bool, limit int, timeout time.Dura
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
-	brokerDB, err := broker.LoadFromFile(resolveBrokerPath())
+	brokerDB, err := broker.Load(resolveBrokerPath())
 	if err != nil {
 		return fmt.Errorf("failed to load brokers: %w", err)
 	}
@@ -1633,7 +1633,7 @@ func runCleanupBounces(remove bool, days int) error {
 
 	// Load broker database
 	brokerPath := resolveBrokerPath()
-	brokerDB, err := broker.LoadFromFile(brokerPath)
+	brokerDB, err := broker.Load(brokerPath)
 	if err != nil {
 		return fmt.Errorf("failed to load brokers: %w", err)
 	}
@@ -1714,6 +1714,9 @@ func runCleanupBounces(remove bool, days int) error {
 		fmt.Printf("\n📊 Found %d broker(s) with invalid email addresses\n", len(bouncedBrokers))
 		fmt.Println("Run with --remove to delete these brokers from the database")
 		return nil
+	}
+	if info, statErr := os.Stat(brokerPath); statErr == nil && info.IsDir() {
+		return fmt.Errorf("cannot remove brokers from a merged directory; rerun with --brokers data/brokers.yaml")
 	}
 
 	// Remove the brokers
