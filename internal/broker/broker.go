@@ -60,6 +60,7 @@ type WorkflowStep struct {
 	Type    string `yaml:"type,omitempty"`
 	Adapter string `yaml:"adapter,omitempty"`
 	URL     string `yaml:"url,omitempty"`
+	Method  string `yaml:"method,omitempty"`
 }
 
 type Monitoring struct {

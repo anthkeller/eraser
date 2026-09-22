@@ -128,6 +128,41 @@ workflows are deferred to their respective pipeline stages. Site-specific
 adapters can implement `internal/adapter.Adapter` and be registered alongside
 the built-in adapters.
 
+### Discovery and recurring verification
+
+Discovery is opt-in per broker because search URLs and matching rules vary by
+site. The generic web checker expands profile placeholders in a configured GET
+URL, then requires the full name plus a second identity signal before marking a
+record as found.
+
+```bash
+# Scan every broker with a configured discovery workflow
+./eraser scan
+
+# Scan one broker
+./eraser scan --broker example
+
+# Recheck only brokers whose monitoring interval has elapsed
+./eraser recheck --limit 100
+
+# Show the latest exposure state for each checked broker
+./eraser exposures
+```
+
+Every result is retained in SQLite with its evidence, confidence, check time,
+and next scheduled check. Rechecks identify records that were removed and
+records that later reappeared.
+
+For a daily Synology Task Scheduler job, run:
+
+```bash
+docker exec eraser eraser recheck --limit 100
+```
+
+The command scans only due brokers, so running it daily does not contact each
+broker daily. `workflow.monitoring.interval_days` controls the interval and
+defaults to 30 days.
+
 If you prefer the command line, Eraser has a full CLI.
 
 ### Installation

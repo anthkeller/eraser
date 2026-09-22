@@ -199,6 +199,24 @@ func (s *Store) migrate() error {
 	CREATE INDEX IF NOT EXISTS idx_pt_broker_id ON pending_tasks(broker_id);
 	CREATE INDEX IF NOT EXISTS idx_pt_task_type ON pending_tasks(task_type);
 	CREATE INDEX IF NOT EXISTS idx_pt_status ON pending_tasks(status);
+
+	-- Exposure checks retain discovery and recurring verification evidence.
+	CREATE TABLE IF NOT EXISTS exposure_checks (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		broker_id TEXT NOT NULL,
+		broker_name TEXT NOT NULL,
+		status TEXT NOT NULL,
+		record_url TEXT,
+		evidence TEXT,
+		confidence REAL DEFAULT 0,
+		error TEXT,
+		checked_at DATETIME NOT NULL,
+		next_check_at DATETIME
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_ec_broker_id ON exposure_checks(broker_id);
+	CREATE INDEX IF NOT EXISTS idx_ec_checked_at ON exposure_checks(checked_at);
+	CREATE INDEX IF NOT EXISTS idx_ec_next_check_at ON exposure_checks(next_check_at);
 	`
 
 	_, err := s.db.Exec(query)

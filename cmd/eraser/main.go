@@ -16,6 +16,7 @@ import (
 	"github.com/eraser-privacy/eraser/internal/broker"
 	"github.com/eraser-privacy/eraser/internal/browser"
 	"github.com/eraser-privacy/eraser/internal/config"
+	"github.com/eraser-privacy/eraser/internal/discovery"
 	"github.com/eraser-privacy/eraser/internal/email"
 	"github.com/eraser-privacy/eraser/internal/history"
 	"github.com/eraser-privacy/eraser/internal/inbox"
@@ -75,11 +76,76 @@ send via Gmail SMTP.`,
 	rootCmd.AddCommand(fillCmd())
 	rootCmd.AddCommand(confirmCmd())
 	rootCmd.AddCommand(cleanupBouncesCmd())
+	rootCmd.AddCommand(scanCmd())
+	rootCmd.AddCommand(recheckCmd())
+	rootCmd.AddCommand(exposuresCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+func scanCmd() *cobra.Command {
+	var brokerID string
+	var limit int
+	var timeout time.Duration
+	cmd := &cobra.Command{
+		Use:   "scan",
+		Short: "Scan configured brokers for exposed personal records",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runExposureScan(brokerID, false, limit, timeout)
+		},
+	}
+	cmd.Flags().StringVar(&brokerID, "broker", "", "scan only one broker ID")
+	cmd.Flags().IntVar(&limit, "limit", 0, "maximum number of brokers to scan")
+	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Second, "timeout per broker")
+	return cmd
+}
+
+func recheckCmd() *cobra.Command {
+	var limit int
+	var timeout time.Duration
+	cmd := &cobra.Command{
+		Use:   "recheck",
+		Short: "Recheck exposures whose monitoring interval is due",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runExposureScan("", true, limit, timeout)
+		},
+	}
+	cmd.Flags().IntVar(&limit, "limit", 100, "maximum number of due brokers to recheck")
+	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Second, "timeout per broker")
+	return cmd
+}
+
+func exposuresCmd() *cobra.Command {
+	var limit int
+	cmd := &cobra.Command{
+		Use:   "exposures",
+		Short: "Show the latest discovery result for each broker",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			store, err := history.NewStore(history.DefaultDBPath())
+			if err != nil {
+				return err
+			}
+			defer store.Close()
+			checks, err := store.GetLatestExposureChecks(limit)
+			if err != nil {
+				return err
+			}
+			if len(checks) == 0 {
+				fmt.Println("No exposure checks recorded. Run eraser scan first.")
+				return nil
+			}
+			fmt.Printf("%-26s %-12s %-10s %-12s\n", "BROKER", "STATUS", "CONFIDENCE", "CHECKED")
+			for _, check := range checks {
+				fmt.Printf("%-26s %-12s %9.0f%% %-12s\n", check.BrokerName, check.Status, check.Confidence*100, check.CheckedAt.Local().Format("2006-01-02"))
+			}
+			return nil
+		},
+	}
+	cmd.Flags().IntVar(&limit, "limit", 100, "maximum number of broker results")
+	return cmd
 }
 
 func initCmd() *cobra.Command {
@@ -1466,6 +1532,91 @@ Examples:
 	cmd.Flags().IntVar(&days, "days", 30, "Number of days to scan for bounced emails")
 
 	return cmd
+}
+
+func runExposureScan(brokerID string, dueOnly bool, limit int, timeout time.Duration) error {
+	cfg, err := config.Load(resolveConfigPath())
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+	brokerDB, err := broker.LoadFromFile(resolveBrokerPath())
+	if err != nil {
+		return fmt.Errorf("failed to load brokers: %w", err)
+	}
+	store, err := history.NewStore(history.DefaultDBPath())
+	if err != nil {
+		return fmt.Errorf("failed to initialize history: %w", err)
+	}
+	defer store.Close()
+
+	registry := discovery.DefaultRegistry(nil)
+	configured := make([]broker.Broker, 0)
+	for _, b := range brokerDB.Brokers {
+		if brokerID != "" && !strings.EqualFold(b.ID, brokerID) {
+			continue
+		}
+		if _, resolveErr := registry.Resolve(b); resolveErr == nil {
+			configured = append(configured, b)
+		}
+	}
+	if brokerID != "" && len(configured) == 0 {
+		return fmt.Errorf("broker %q was not found or has no discovery workflow", brokerID)
+	}
+	if len(configured) == 0 {
+		fmt.Println("No brokers have discovery workflows configured.")
+		fmt.Println("Add workflow.discovery to broker YAML entries before scanning.")
+		return nil
+	}
+
+	if dueOnly {
+		ids := make([]string, len(configured))
+		byID := make(map[string]broker.Broker, len(configured))
+		for i, b := range configured {
+			ids[i], byID[b.ID] = b.ID, b
+		}
+		dueIDs, dueErr := store.GetDueBrokerIDs(ids, time.Now().UTC(), limit)
+		if dueErr != nil {
+			return dueErr
+		}
+		configured = configured[:0]
+		for _, id := range dueIDs {
+			configured = append(configured, byID[id])
+		}
+	} else if limit > 0 && len(configured) > limit {
+		configured = configured[:limit]
+	}
+
+	if len(configured) == 0 {
+		fmt.Println("No exposure checks are due.")
+		return nil
+	}
+
+	fmt.Printf("Scanning %d broker(s)...\n", len(configured))
+	for i, b := range configured {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		check := registry.Check(ctx, b, cfg.Profile)
+		cancel()
+		previous, previousErr := store.GetLatestExposureCheck(b.ID)
+		if previousErr != nil {
+			return previousErr
+		}
+		if previous != nil {
+			check.Status = history.TransitionExposureStatus(previous.Status, check.Status)
+		}
+		interval := b.Workflow.Monitoring.IntervalDays
+		if interval <= 0 {
+			interval = 30
+		}
+		check.NextCheckAt = time.Now().UTC().AddDate(0, 0, interval)
+		if err := store.AddExposureCheck(&check); err != nil {
+			return err
+		}
+		fmt.Printf("[%d/%d] %-24s %-12s %.0f%%\n", i+1, len(configured), b.Name, check.Status, check.Confidence*100)
+		if check.Error != "" {
+			fmt.Printf("       %s\n", check.Error)
+		}
+	}
+	return nil
 }
 
 func runCleanupBounces(remove bool, days int) error {
