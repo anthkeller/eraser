@@ -19,5 +19,7 @@ jobs:
           cache: true
       - run: go test ./...
       - run: go vet ./...
+      - name: Validate browser extension
+        run: node extension/validate.mjs
       - name: Verify formatting
         run: test -z "$(gofmt -l .)"

@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Eraser Privacy Control</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header><div class="mark">E</div><div><h1>Eraser</h1><p>Privacy Control</p></div></header>
+  <section class="status"><span class="dot"></span><div><strong>Universal opt-out active</strong><p>GPC and DNT are sent with web requests.</p></div></section>
+  <section class="site"><p class="label">Current site</p><p id="hostname">Unavailable</p><button id="remember" type="button">Remember this account site</button><p id="message" role="status"></p></section>
+  <section class="support"><p class="label">Site declaration</p><p id="support">Checking /.well-known/gpc.json…</p></section>
+  <footer>Sites are saved only when you press the button. No browsing history is collected.</footer>
+  <script src="popup.js"></script>
+</body>
+</html>

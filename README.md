@@ -205,6 +205,25 @@ adapters can continue from that user-controlled authenticated session to find
 privacy settings, opt out of sharing, or request account deletion without
 giving Eraser the account password.
 
+### Universal browser privacy signal
+
+The `extension/` directory contains an optional Manifest V3 companion for
+Chromium browsers. It sends `Sec-GPC: 1` as the primary universal opt-out
+signal, also sends the legacy `DNT: 1` preference, and exposes
+`navigator.globalPrivacyControl` to websites. The popup can check a site's
+`/.well-known/gpc.json` declaration and remember an account domain only when
+the user explicitly selects the button; it does not collect browsing history.
+
+To load it locally, open `chrome://extensions`, enable Developer mode, select
+**Load unpacked**, and choose the `extension` directory. See
+[`extension/README.md`](extension/README.md) for details.
+
+GPC communicates an opt-out preference; it is not an account deletion request
+and does not prohibit every kind of first-party processing. Site-specific
+authenticated actions and broader public-data discovery remain separate,
+reviewable workflows. See [`docs/internet-discovery.md`](docs/internet-discovery.md)
+for the proposed discovery and verification architecture.
+
 If you prefer the command line, Eraser has a full CLI.
 
 ### Installation
@@ -446,6 +465,8 @@ eraser/
 │   └── web/                 # Web UI server and handlers
 ├── data/brokers.yaml        # Curated broker database
 ├── data/registry-brokers.yaml # Normalized public registry records
+├── extension/               # GPC and DNT browser companion
+├── docs/                    # Architecture and safety documentation
 └── config.example.yaml      # Example configuration
 ```
 

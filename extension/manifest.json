@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "Eraser Privacy Control",
+  "version": "0.1.0",
+  "description": "Sends Global Privacy Control and Do Not Track signals without collecting browsing history.",
+  "permissions": [
+    "declarativeNetRequestWithHostAccess",
+    "storage",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "privacy_signals",
+        "enabled": true,
+        "path": "rules/privacy-signals.json"
+      }
+    ]
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["gpc.js"],
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": true
+    }
+  ],
+  "action": {
+    "default_title": "Eraser Privacy Control",
+    "default_popup": "popup.html"
+  }
+}
