@@ -163,6 +163,48 @@ The command scans only due brokers, so running it daily does not contact each
 broker daily. `workflow.monitoring.interval_days` controls the interval and
 defaults to 30 days.
 
+### Broker intelligence and contact validation
+
+Eraser calculates three transparent scores for every broker:
+
+- **Quality** measures contact completeness, registry provenance, and validated endpoints.
+- **Risk** weights reported collection of credentials, government IDs, biometrics, precise location, minors' data, birth dates, and reproductive-health data.
+- **Priority** combines risk and quality so high-risk brokers with actionable contacts rise first.
+
+Validation uses public DNS and HTTP checks only. It does not send test email.
+Local, private, link-local, and redirect destinations are blocked.
+
+```bash
+# Validate the first 100 brokers
+./eraser validate-brokers --limit 100
+
+# Validate one broker
+./eraser validate-brokers --broker spokeo
+```
+
+Open `/intelligence` in the web interface for the prioritized dashboard.
+
+### Account privacy inventory
+
+Eraser can import account lists exported by Chrome-compatible browsers,
+Bitwarden, and 1Password:
+
+```bash
+./eraser import-accounts passwords.csv
+./eraser import-accounts vault.csv --source bitwarden
+```
+
+Despite the common export filename, Eraser imports only service name, login
+URL, username, and source. Passwords, TOTP secrets, notes, and custom fields
+have no destination field and are discarded during parsing. Delete the
+plaintext export after confirming the import. The SQLite application database
+is restricted to the current operating-system user.
+
+The `/accounts` page opens each login in the user's browser. Future site
+adapters can continue from that user-controlled authenticated session to find
+privacy settings, opt out of sharing, or request account deletion without
+giving Eraser the account password.
+
 If you prefer the command line, Eraser has a full CLI.
 
 ### Installation

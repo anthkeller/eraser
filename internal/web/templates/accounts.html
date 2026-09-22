@@ -1,0 +1,31 @@
+{{define "content"}}
+<div class="fade-in-up">
+    <div class="mb-8">
+        <h1 class="font-display text-3xl font-bold text-primary">Account Privacy</h1>
+        <p class="text-secondary mt-1">Accounts imported without passwords, TOTP secrets, notes, or custom fields.</p>
+    </div>
+    <div class="card p-5 mb-6">
+        <p class="text-sm text-secondary">Import locally with <code class="text-accent">eraser import-accounts export.csv</code>. Eraser stores only the service, login URL, username, and source. Login remains in your browser or password manager.</p>
+    </div>
+    {{if .Accounts}}
+    <div class="card overflow-hidden">
+        <div class="p-5 border-b" style="border-color: var(--border);"><h2 class="font-display text-lg font-semibold text-primary">{{len .Accounts}} imported accounts</h2></div>
+        <div class="overflow-x-auto">
+            <table class="w-full">
+                <thead><tr class="text-left text-xs uppercase text-muted" style="background: var(--bg-elevated);"><th class="p-4">Service</th><th class="p-4">Username</th><th class="p-4">Source</th><th class="p-4">Action</th></tr></thead>
+                <tbody>{{range .Accounts}}
+                    <tr class="border-t" style="border-color: var(--border-subtle);">
+                        <td class="p-4 font-medium text-primary">{{.Service}}</td>
+                        <td class="p-4 text-sm text-secondary">{{.Username}}</td>
+                        <td class="p-4 text-sm text-muted">{{.Source}}</td>
+                        <td class="p-4"><a class="btn btn-secondary text-sm" href="{{.LoginURL}}" target="_blank" rel="noopener noreferrer">Open login</a></td>
+                    </tr>
+                {{end}}</tbody>
+            </table>
+        </div>
+    </div>
+    {{else}}
+    <div class="card p-10 text-center"><p class="text-primary font-medium">No accounts imported</p><p class="text-sm text-muted mt-2">Export a CSV from your browser, Bitwarden, or 1Password and import it locally.</p></div>
+    {{end}}
+</div>
+{{end}}

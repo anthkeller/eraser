@@ -1,0 +1,56 @@
+{{define "content"}}
+<div class="fade-in-up">
+    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+        <div>
+            <h1 class="font-display text-3xl font-bold text-primary">Broker Intelligence</h1>
+            <p class="text-secondary mt-1">Prioritize sensitive exposure and identify unreliable removal contacts.</p>
+        </div>
+        <div class="text-sm text-muted">Run <code class="text-accent">eraser validate-brokers</code> to refresh validation data.</div>
+    </div>
+
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <div class="card p-5"><p class="text-sm text-muted">Catalog</p><p class="font-display text-3xl font-bold text-primary">{{.Stats.Total}}</p></div>
+        <div class="card p-5"><p class="text-sm text-muted">Validated</p><p class="font-display text-3xl font-bold text-accent">{{.Stats.Validated}}</p></div>
+        <div class="card p-5"><p class="text-sm text-muted">High Risk</p><p class="font-display text-3xl font-bold text-warning">{{.Stats.HighRisk}}</p></div>
+        <div class="card p-5"><p class="text-sm text-muted">Imported Accounts</p><p class="font-display text-3xl font-bold text-primary">{{.Stats.Accounts}}</p></div>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+        <div class="card p-4"><p class="text-sm text-muted">Broken websites</p><p class="text-2xl font-bold text-error">{{.Stats.BrokenWebsites}}</p></div>
+        <div class="card p-4"><p class="text-sm text-muted">Broken opt-out links</p><p class="text-2xl font-bold text-error">{{.Stats.BrokenOptOut}}</p></div>
+        <div class="card p-4"><p class="text-sm text-muted">Invalid email domains</p><p class="text-2xl font-bold text-error">{{.Stats.InvalidEmailDomains}}</p></div>
+    </div>
+
+    <div class="card overflow-hidden">
+        <div class="p-5 border-b" style="border-color: var(--border);">
+            <h2 class="font-display text-lg font-semibold text-primary">Priority brokers</h2>
+            <p class="text-sm text-muted">Top 100 ranked by sensitive-data risk and contact confidence.</p>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full">
+                <thead><tr class="text-left text-xs uppercase text-muted" style="background: var(--bg-elevated);">
+                    <th class="p-4">Broker</th><th class="p-4">Priority</th><th class="p-4">Risk</th><th class="p-4">Quality</th><th class="p-4">Contact checks</th><th class="p-4">Signals</th>
+                </tr></thead>
+                <tbody>
+                {{range .Brokers}}
+                    <tr class="border-t" style="border-color: var(--border-subtle);">
+                        <td class="p-4"><p class="font-medium text-primary">{{.Broker.Name}}</p><p class="text-xs text-muted">{{.Broker.ID}}</p></td>
+                        <td class="p-4"><span class="font-bold text-warning">{{.Score.Priority}}</span></td>
+                        <td class="p-4"><span class="font-semibold text-error">{{.Score.Risk}}</span></td>
+                        <td class="p-4"><span class="font-semibold text-accent">{{.Score.Quality}}</span></td>
+                        <td class="p-4 text-xs">
+                            {{if .HasValidation}}
+                            <span class="{{if .Validation.WebsiteValid}}text-success{{else}}text-error{{end}}">Web</span> ·
+                            <span class="{{if .Validation.OptOutValid}}text-success{{else}}text-error{{end}}">Opt-out</span> ·
+                            <span class="{{if .Validation.EmailDomainValid}}text-success{{else}}text-error{{end}}">Email</span>
+                            {{else}}<span class="text-muted">Not checked</span>{{end}}
+                        </td>
+                        <td class="p-4 text-xs text-muted">{{range .Broker.RiskFlags}}<span class="inline-block mr-1 mb-1 px-2 py-1 rounded" style="background: var(--bg-elevated);">{{.}}</span>{{end}}</td>
+                    </tr>
+                {{end}}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{{end}}

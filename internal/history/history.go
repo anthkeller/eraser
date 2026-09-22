@@ -119,6 +119,16 @@ func NewStore(dbPath string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0700); err != nil {
 		return nil, fmt.Errorf("failed to create history directory: %w", err)
 	}
+	file, err := os.OpenFile(dbPath, os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create history database: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return nil, fmt.Errorf("failed to close history database file: %w", err)
+	}
+	if err := os.Chmod(dbPath, 0600); err != nil {
+		return nil, fmt.Errorf("failed to secure history database: %w", err)
+	}
 
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
@@ -217,6 +227,33 @@ func (s *Store) migrate() error {
 	CREATE INDEX IF NOT EXISTS idx_ec_broker_id ON exposure_checks(broker_id);
 	CREATE INDEX IF NOT EXISTS idx_ec_checked_at ON exposure_checks(checked_at);
 	CREATE INDEX IF NOT EXISTS idx_ec_next_check_at ON exposure_checks(next_check_at);
+
+	CREATE TABLE IF NOT EXISTS broker_validations (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		broker_id TEXT NOT NULL,
+		website_valid INTEGER DEFAULT 0,
+		website_status_code INTEGER DEFAULT 0,
+		optout_valid INTEGER DEFAULT 0,
+		optout_status_code INTEGER DEFAULT 0,
+		email_domain_valid INTEGER DEFAULT 0,
+		error TEXT,
+		checked_at DATETIME NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS idx_bv_broker_id ON broker_validations(broker_id);
+	CREATE INDEX IF NOT EXISTS idx_bv_checked_at ON broker_validations(checked_at);
+
+	CREATE TABLE IF NOT EXISTS account_inventory (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		service TEXT NOT NULL,
+		login_url TEXT NOT NULL,
+		username TEXT NOT NULL DEFAULT '',
+		source TEXT NOT NULL,
+		status TEXT NOT NULL DEFAULT 'pending',
+		privacy_url TEXT,
+		imported_at DATETIME NOT NULL,
+		UNIQUE(login_url, username)
+	);
+	CREATE INDEX IF NOT EXISTS idx_ai_status ON account_inventory(status);
 	`
 
 	_, err := s.db.Exec(query)

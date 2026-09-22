@@ -8,10 +8,12 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/eraser-privacy/eraser/internal/accounts"
 	"github.com/eraser-privacy/eraser/internal/adapter"
 	"github.com/eraser-privacy/eraser/internal/broker"
 	"github.com/eraser-privacy/eraser/internal/browser"
@@ -20,7 +22,9 @@ import (
 	"github.com/eraser-privacy/eraser/internal/email"
 	"github.com/eraser-privacy/eraser/internal/history"
 	"github.com/eraser-privacy/eraser/internal/inbox"
+	"github.com/eraser-privacy/eraser/internal/intelligence"
 	"github.com/eraser-privacy/eraser/internal/template"
+	brokerValidation "github.com/eraser-privacy/eraser/internal/validation"
 	"github.com/eraser-privacy/eraser/internal/web"
 	"github.com/spf13/cobra"
 )
@@ -79,6 +83,8 @@ send via Gmail SMTP.`,
 	rootCmd.AddCommand(scanCmd())
 	rootCmd.AddCommand(recheckCmd())
 	rootCmd.AddCommand(exposuresCmd())
+	rootCmd.AddCommand(validateBrokersCmd())
+	rootCmd.AddCommand(importAccountsCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -146,6 +152,110 @@ func exposuresCmd() *cobra.Command {
 	}
 	cmd.Flags().IntVar(&limit, "limit", 100, "maximum number of broker results")
 	return cmd
+}
+
+func validateBrokersCmd() *cobra.Command {
+	var brokerID string
+	var limit int
+	var timeout time.Duration
+	cmd := &cobra.Command{
+		Use:   "validate-brokers",
+		Short: "Validate broker websites, opt-out links, and email domains",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runBrokerValidation(brokerID, limit, timeout)
+		},
+	}
+	cmd.Flags().StringVar(&brokerID, "broker", "", "validate only one broker ID")
+	cmd.Flags().IntVar(&limit, "limit", 100, "maximum brokers to validate")
+	cmd.Flags().DurationVar(&timeout, "timeout", 15*time.Second, "timeout per broker")
+	return cmd
+}
+
+func importAccountsCmd() *cobra.Command {
+	var source string
+	cmd := &cobra.Command{
+		Use:   "import-accounts FILE",
+		Short: "Import account URLs and usernames without importing passwords",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			stream, err := os.Open(args[0])
+			if err != nil {
+				return err
+			}
+			defer stream.Close()
+			inventory, err := accounts.ImportCSV(stream, source)
+			if err != nil {
+				return err
+			}
+			store, err := history.NewStore(history.DefaultDBPath())
+			if err != nil {
+				return err
+			}
+			defer store.Close()
+			for _, account := range inventory {
+				if err := store.UpsertAccount(account); err != nil {
+					return err
+				}
+			}
+			fmt.Printf("Imported %d account identities. Passwords, TOTP secrets, notes, and custom fields were ignored.\n", len(inventory))
+			fmt.Println("Delete the plaintext export after confirming the import.")
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&source, "source", "auto", "export type: auto, browser, bitwarden, or 1password")
+	return cmd
+}
+
+func runBrokerValidation(brokerID string, limit int, timeout time.Duration) error {
+	db, err := broker.Load(resolveBrokerPath())
+	if err != nil {
+		return fmt.Errorf("failed to load brokers: %w", err)
+	}
+	store, err := history.NewStore(history.DefaultDBPath())
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	validator := brokerValidation.New(timeout)
+	selected := make([]broker.Broker, 0)
+	for _, b := range db.Brokers {
+		if brokerID != "" && !strings.EqualFold(b.ID, brokerID) {
+			continue
+		}
+		selected = append(selected, b)
+	}
+	sort.Slice(selected, func(i, j int) bool {
+		left := intelligence.Calculate(selected[i], intelligence.ValidationSignals{})
+		right := intelligence.Calculate(selected[j], intelligence.ValidationSignals{})
+		if left.Priority == right.Priority {
+			return selected[i].Name < selected[j].Name
+		}
+		return left.Priority > right.Priority
+	})
+	if limit > 0 && len(selected) > limit {
+		selected = selected[:limit]
+	}
+	if len(selected) == 0 {
+		return fmt.Errorf("no matching brokers found")
+	}
+	fmt.Printf("Validating %d broker(s) using public DNS and HTTP checks...\n", len(selected))
+	for i, b := range selected {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		result := validator.Validate(ctx, b)
+		cancel()
+		if err := store.AddBrokerValidation(&result); err != nil {
+			return err
+		}
+		score := intelligence.Calculate(b, intelligence.ValidationSignals{
+			Checked: true, WebsiteValid: result.WebsiteValid,
+			OptOutValid: result.OptOutValid, EmailDomainValid: result.EmailDomainValid,
+		})
+		fmt.Printf("[%d/%d] %-28s quality=%3d risk=%3d priority=%3d\n", i+1, len(selected), b.Name, score.Quality, score.Risk, score.Priority)
+		if i < len(selected)-1 {
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+	return nil
 }
 
 func initCmd() *cobra.Command {

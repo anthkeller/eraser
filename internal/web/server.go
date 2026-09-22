@@ -14,16 +14,19 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/eraser-privacy/eraser/internal/accounts"
 	"github.com/eraser-privacy/eraser/internal/adapter"
 	"github.com/eraser-privacy/eraser/internal/broker"
 	"github.com/eraser-privacy/eraser/internal/config"
 	"github.com/eraser-privacy/eraser/internal/email"
 	"github.com/eraser-privacy/eraser/internal/history"
 	"github.com/eraser-privacy/eraser/internal/inbox"
+	"github.com/eraser-privacy/eraser/internal/intelligence"
 	emaTemplate "github.com/eraser-privacy/eraser/internal/template"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -401,6 +404,8 @@ func (s *Server) setupRouter() *chi.Mux {
 	r.Get("/settings", s.handleSettings)
 	r.Post("/settings/inbox", s.handleSettingsInbox)
 	r.Get("/pipeline", s.handlePipeline)
+	r.Get("/intelligence", s.handleIntelligence)
+	r.Get("/accounts", s.handleAccounts)
 	r.Get("/tasks", s.handleTasks)
 	r.Get("/tasks/{taskID}", s.handleTaskDetail)
 	r.Get("/tasks/{taskID}/helper", s.handleTaskHelper)
@@ -526,6 +531,67 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.renderWithCSRF(w, r, "dashboard.html", data)
+}
+
+type IntelligenceStats struct {
+	Total, Validated, HighRisk, BrokenWebsites, BrokenOptOut, InvalidEmailDomains, Accounts int
+}
+
+type BrokerIntelligence struct {
+	Broker        broker.Broker
+	Score         intelligence.Score
+	Validation    history.BrokerValidation
+	HasValidation bool
+}
+
+func (s *Server) handleIntelligence(w http.ResponseWriter, r *http.Request) {
+	validations := map[string]history.BrokerValidation{}
+	if s.historyStore != nil {
+		validations, _ = s.historyStore.GetLatestBrokerValidations()
+	}
+	stats := IntelligenceStats{Total: len(s.brokerDB.Brokers), Validated: len(validations)}
+	items := make([]BrokerIntelligence, 0, len(s.brokerDB.Brokers))
+	for _, b := range s.brokerDB.Brokers {
+		v, checked := validations[b.ID]
+		signals := intelligence.ValidationSignals{Checked: checked, WebsiteValid: v.WebsiteValid, OptOutValid: v.OptOutValid, EmailDomainValid: v.EmailDomainValid}
+		score := intelligence.Calculate(b, signals)
+		if score.Risk >= 40 {
+			stats.HighRisk++
+		}
+		if checked && b.Website != "" && !v.WebsiteValid {
+			stats.BrokenWebsites++
+		}
+		if checked && b.OptOutURL != "" && !v.OptOutValid {
+			stats.BrokenOptOut++
+		}
+		if checked && b.Email != "" && !v.EmailDomainValid {
+			stats.InvalidEmailDomains++
+		}
+		items = append(items, BrokerIntelligence{Broker: b, Score: score, Validation: v, HasValidation: checked})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Score.Priority == items[j].Score.Priority {
+			return items[i].Broker.Name < items[j].Broker.Name
+		}
+		return items[i].Score.Priority > items[j].Score.Priority
+	})
+	if len(items) > 100 {
+		items = items[:100]
+	}
+	if s.historyStore != nil {
+		if accounts, err := s.historyStore.GetAccountInventory(100000); err == nil {
+			stats.Accounts = len(accounts)
+		}
+	}
+	s.renderWithCSRF(w, r, "intelligence.html", map[string]interface{}{"Title": "Intelligence", "Stats": stats, "Brokers": items})
+}
+
+func (s *Server) handleAccounts(w http.ResponseWriter, r *http.Request) {
+	accountList := []accounts.Account{}
+	if s.historyStore != nil {
+		accountList, _ = s.historyStore.GetAccountInventory(5000)
+	}
+	s.renderWithCSRF(w, r, "accounts.html", map[string]interface{}{"Title": "Accounts", "Accounts": accountList})
 }
 
 func (s *Server) handleBrokers(w http.ResponseWriter, r *http.Request) {
