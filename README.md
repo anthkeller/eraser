@@ -105,9 +105,11 @@ The versioned `GET /api/v1/system` endpoint allows future mobile, web, and
 extension clients to discover non-secret capabilities without learning the
 internal owner identifier.
 
-Hosted mode is architectural groundwork, not a production SaaS switch. It
-rejects insecure public URLs, but production hosting still requires OIDC
-authentication, owner-scoped PostgreSQL storage, and external workers. See
+Hosted mode now verifies OIDC bearer tokens and restricts the deployment to one
+configured token subject. It rejects insecure public URLs and ownerless jobs.
+The included in-memory queue provides the same interface a future SQS worker
+will implement. A shared multi-user service still requires owner-scoped
+PostgreSQL storage and a browser authorization-code flow. See
 [`docs/commercialization.md`](docs/commercialization.md) for configuration,
 deployment boundaries, and the licensing review required before restricting
 third-party hosted resale.

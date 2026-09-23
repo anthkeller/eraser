@@ -28,10 +28,18 @@ be enabled until authentication and owner-scoped storage are implemented.
 | `ERASER_PUBLIC_URL` | empty | Canonical external HTTP or HTTPS URL |
 | `ERASER_OPEN_BROWSER` | `true` | Open the local dashboard at startup |
 | `ERASER_OWNER_ID` | `local` | Internal owner boundary; never returned publicly |
+| `ERASER_AUTH_ISSUER` | empty | Hosted OIDC issuer URL |
+| `ERASER_AUTH_AUDIENCE` | empty | Hosted OIDC client ID or token audience |
 
 Hosted mode rejects the community edition and rejects an HTTP public URL. When
 the public URL uses HTTPS, Eraser marks CSRF cookies secure and trusts only that
 URL's host in addition to local development origins.
+
+Hosted mode also requires a non-default owner ID and a discoverable OIDC
+provider. Every route except health, readiness, and public system metadata
+requires a verified bearer token. Its `sub` claim must exactly match
+`ERASER_OWNER_ID`. This creates a strong single-subscriber deployment boundary
+without presenting family roles or RBAC.
 
 Operational endpoints:
 
@@ -39,16 +47,23 @@ Operational endpoints:
 - `GET /readyz` verifies that the application database responds.
 - `GET /api/v1/system` returns non-secret edition, version, deployment, and
   capability metadata for web and mobile clients.
+- `GET /api/v1/me` returns the authenticated subject and is protected in hosted
+  mode.
 
 ## Hosted target architecture
 
-The next hosted milestone should add these replaceable interfaces:
+The current foundation includes OIDC verification and a queue interface with an
+owner ID on every job. The in-memory implementation supports self-hosted
+operation. A future SQS implementation can satisfy the same interface.
 
-1. OIDC authentication that maps a verified token subject to an owner ID.
-2. PostgreSQL storage with an owner ID on every user-controlled record.
-3. A queue interface for scan, validation, email, and recurring-check workers.
-4. Object storage for encrypted evidence with short retention periods.
-5. Provider interfaces for email, notifications, billing, and entitlements.
+The next shared-service milestone should add these replaceable interfaces:
+
+1. PostgreSQL storage with an owner ID on every user-controlled record.
+2. An SQS queue implementation for scan, validation, email, and recurring jobs.
+3. Object storage for encrypted evidence with short retention periods.
+4. Provider interfaces for email, notifications, billing, and entitlements.
+5. An OIDC authorization-code flow for the browser UI. The current hosted
+   interface expects a bearer token supplied by a mobile app, SPA, or gateway.
 
 An AWS deployment can map these interfaces to Cognito, RDS PostgreSQL, SQS,
 S3/KMS, EventBridge, SES, Secrets Manager, WAF, and ECS Fargate. Self-hosting can

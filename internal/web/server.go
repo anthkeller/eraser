@@ -21,6 +21,7 @@ import (
 
 	"github.com/eraser-privacy/eraser/internal/accounts"
 	"github.com/eraser-privacy/eraser/internal/adapter"
+	"github.com/eraser-privacy/eraser/internal/auth"
 	"github.com/eraser-privacy/eraser/internal/broker"
 	"github.com/eraser-privacy/eraser/internal/config"
 	"github.com/eraser-privacy/eraser/internal/email"
@@ -123,6 +124,7 @@ type Server struct {
 	jobManager     *JobManager
 	jobPersistence *JobPersistence
 	product        product.Settings
+	authVerifier   auth.Verifier
 }
 
 func NewServer(port int, cfg *config.Config, configPath string, brokerDB *broker.BrokerDatabase, historyStore *history.Store, tmplEngine *emaTemplate.Engine, options ...ServerOption) (*Server, error) {
@@ -156,6 +158,18 @@ func NewServer(port int, cfg *config.Config, configPath string, brokerDB *broker
 	for _, option := range options {
 		option(s)
 	}
+	if err := s.product.Validate(); err != nil {
+		return nil, err
+	}
+	if s.product.Deployment == product.DeploymentHosted && s.authVerifier == nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		verifier, err := auth.NewOIDCVerifier(ctx, s.product.AuthIssuer, s.product.AuthAudience)
+		if err != nil {
+			return nil, err
+		}
+		s.authVerifier = verifier
+	}
 
 	tmpl, err := s.parseTemplates()
 	if err != nil {
@@ -169,6 +183,10 @@ type ServerOption func(*Server)
 
 func WithProductSettings(settings product.Settings) ServerOption {
 	return func(server *Server) { server.product = settings }
+}
+
+func WithAuthVerifier(verifier auth.Verifier) ServerOption {
+	return func(server *Server) { server.authVerifier = verifier }
 }
 
 // parseTemplates loads and parses all HTML templates
@@ -401,6 +419,12 @@ func (s *Server) setupRouter() *chi.Mux {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Compress(5))
 	r.Use(securityHeaders)
+	if s.product.Deployment == product.DeploymentHosted {
+		publicPaths := map[string]struct{}{
+			"/healthz": {}, "/readyz": {}, "/api/v1/system": {},
+		}
+		r.Use(auth.Middleware(s.authVerifier, s.product.OwnerID, publicPaths))
+	}
 
 	// Public URL controls secure cookies and adds its host to trusted origins.
 	csrfMiddleware := csrf.Protect(
@@ -422,6 +446,7 @@ func (s *Server) setupRouter() *chi.Mux {
 	r.Get("/healthz", s.handleHealth)
 	r.Get("/readyz", s.handleReady)
 	r.Get("/api/v1/system", s.handleAPISystem)
+	r.Get("/api/v1/me", s.handleAPIMe)
 
 	// Routes
 	r.Get("/", s.handleDashboard)
@@ -496,6 +521,17 @@ func (s *Server) handleAPISystem(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(s.product.Info()); err != nil {
 		log.Printf("failed to encode product information: %v", err)
+	}
+}
+
+func (s *Server) handleAPIMe(w http.ResponseWriter, r *http.Request) {
+	principal, ok := auth.PrincipalFromContext(r.Context())
+	if !ok {
+		principal = auth.Principal{Subject: s.product.OwnerID}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(principal); err != nil {
+		log.Printf("failed to encode principal: %v", err)
 	}
 }
 

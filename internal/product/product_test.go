@@ -10,13 +10,24 @@ func TestHostedCommunityIsRejected(t *testing.T) {
 }
 
 func TestHostedDeploymentRequiresHTTPSWhenPublicURLIsSet(t *testing.T) {
-	settings := Settings{Edition: EditionCloud, Deployment: DeploymentHosted, BindAddress: "0.0.0.0", OwnerID: "user", PublicURL: "http://eraser.example"}
+	settings := Settings{Edition: EditionCloud, Deployment: DeploymentHosted, BindAddress: "0.0.0.0", OwnerID: "user", PublicURL: "http://eraser.example", AuthIssuer: "https://id.example", AuthAudience: "eraser"}
 	if err := settings.Validate(); err == nil {
 		t.Fatal("expected an insecure hosted public URL to be rejected")
 	}
 	settings.PublicURL = "https://eraser.example"
 	if err := settings.Validate(); err != nil {
 		t.Fatalf("expected valid hosted settings: %v", err)
+	}
+}
+
+func TestHostedDeploymentRequiresOIDCAndExplicitOwner(t *testing.T) {
+	settings := Settings{Edition: EditionCloud, Deployment: DeploymentHosted, BindAddress: "0.0.0.0", OwnerID: "local"}
+	if err := settings.Validate(); err == nil {
+		t.Fatal("expected default local owner to be rejected")
+	}
+	settings.OwnerID = "owner-1"
+	if err := settings.Validate(); err == nil {
+		t.Fatal("expected missing OIDC configuration to be rejected")
 	}
 }
 

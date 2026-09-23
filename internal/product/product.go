@@ -31,12 +31,14 @@ type Capabilities struct {
 }
 
 type Settings struct {
-	Edition     Edition
-	Deployment  Deployment
-	BindAddress string
-	PublicURL   string
-	OpenBrowser bool
-	OwnerID     string
+	Edition      Edition
+	Deployment   Deployment
+	BindAddress  string
+	PublicURL    string
+	OpenBrowser  bool
+	OwnerID      string
+	AuthIssuer   string
+	AuthAudience string
 }
 
 type PublicInfo struct {
@@ -49,12 +51,14 @@ type PublicInfo struct {
 
 func LoadFromEnv() (Settings, error) {
 	settings := Settings{
-		Edition:     Edition(valueOrDefault("ERASER_EDITION", string(EditionCommunity))),
-		Deployment:  Deployment(valueOrDefault("ERASER_DEPLOYMENT", string(DeploymentSelfHosted))),
-		BindAddress: valueOrDefault("ERASER_BIND", "127.0.0.1"),
-		PublicURL:   strings.TrimSpace(os.Getenv("ERASER_PUBLIC_URL")),
-		OwnerID:     valueOrDefault("ERASER_OWNER_ID", "local"),
-		OpenBrowser: true,
+		Edition:      Edition(valueOrDefault("ERASER_EDITION", string(EditionCommunity))),
+		Deployment:   Deployment(valueOrDefault("ERASER_DEPLOYMENT", string(DeploymentSelfHosted))),
+		BindAddress:  valueOrDefault("ERASER_BIND", "127.0.0.1"),
+		PublicURL:    strings.TrimSpace(os.Getenv("ERASER_PUBLIC_URL")),
+		OwnerID:      valueOrDefault("ERASER_OWNER_ID", "local"),
+		AuthIssuer:   strings.TrimSpace(os.Getenv("ERASER_AUTH_ISSUER")),
+		AuthAudience: strings.TrimSpace(os.Getenv("ERASER_AUTH_AUDIENCE")),
+		OpenBrowser:  true,
 	}
 	if raw, ok := os.LookupEnv("ERASER_OPEN_BROWSER"); ok {
 		value, err := strconv.ParseBool(raw)
@@ -88,6 +92,14 @@ func (s Settings) Validate() error {
 	}
 	if strings.TrimSpace(s.OwnerID) == "" {
 		return fmt.Errorf("owner ID cannot be empty")
+	}
+	if s.Deployment == DeploymentHosted {
+		if s.OwnerID == "local" {
+			return fmt.Errorf("hosted deployments require an explicit ERASER_OWNER_ID matching the OIDC subject")
+		}
+		if s.AuthIssuer == "" || s.AuthAudience == "" {
+			return fmt.Errorf("hosted deployments require ERASER_AUTH_ISSUER and ERASER_AUTH_AUDIENCE")
+		}
 	}
 	if s.PublicURL != "" {
 		parsed, err := url.Parse(s.PublicURL)
