@@ -744,8 +744,13 @@ func runServe(port int, productSettings product.Settings) error {
 		return fmt.Errorf("failed to load brokers: %w", err)
 	}
 
-	// Initialize history store
-	store, err := history.NewStore(history.DefaultDBPath())
+	// Hosted deployments use PostgreSQL with connection-level owner isolation.
+	var store *history.Store
+	if productSettings.DatabaseURL != "" {
+		store, err = history.NewPostgresStore(productSettings.DatabaseURL, productSettings.OwnerID)
+	} else {
+		store, err = history.NewStore(history.DefaultDBPath())
+	}
 	if err != nil {
 		return fmt.Errorf("failed to initialize history: %w", err)
 	}

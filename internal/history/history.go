@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
 )
 
@@ -93,7 +96,43 @@ type PendingTask struct {
 }
 
 type Store struct {
-	db *sql.DB
+	db      *database
+	driver  string
+	ownerID string
+}
+
+type database struct {
+	*sql.DB
+	driver string
+}
+
+func (d *database) bind(query string) string {
+	if d.driver != "postgres" {
+		return query
+	}
+	var builder strings.Builder
+	argument := 1
+	for _, character := range query {
+		if character == '?' {
+			fmt.Fprintf(&builder, "$%d", argument)
+			argument++
+		} else {
+			builder.WriteRune(character)
+		}
+	}
+	return builder.String()
+}
+
+func (d *database) Exec(query string, args ...any) (sql.Result, error) {
+	return d.DB.Exec(d.bind(query), args...)
+}
+
+func (d *database) Query(query string, args ...any) (*sql.Rows, error) {
+	return d.DB.Query(d.bind(query), args...)
+}
+
+func (d *database) QueryRow(query string, args ...any) *sql.Row {
+	return d.DB.QueryRow(d.bind(query), args...)
 }
 
 // scanRecord handles nullable columns when scanning a row
@@ -135,7 +174,7 @@ func NewStore(dbPath string) (*Store, error) {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	store := &Store{db: db}
+	store := &Store{db: &database{DB: db, driver: "sqlite"}, driver: "sqlite", ownerID: "local"}
 	if err := store.migrate(); err != nil {
 		db.Close()
 		return nil, err
@@ -143,8 +182,74 @@ func NewStore(dbPath string) (*Store, error) {
 	return store, nil
 }
 
+func NewPostgresStore(dsn, ownerID string) (*Store, error) {
+	if strings.TrimSpace(dsn) == "" {
+		return nil, fmt.Errorf("PostgreSQL connection URL is required")
+	}
+	if strings.TrimSpace(ownerID) == "" || ownerID == "local" {
+		return nil, fmt.Errorf("an explicit owner ID is required for PostgreSQL")
+	}
+	configuration, err := pgx.ParseConfig(dsn)
+	if err != nil {
+		return nil, fmt.Errorf("parse PostgreSQL connection URL: %w", err)
+	}
+	configuration.RuntimeParams["app.owner_id"] = ownerID
+	db := stdlib.OpenDB(*configuration)
+	db.SetConnMaxIdleTime(5 * time.Minute)
+	db.SetConnMaxLifetime(30 * time.Minute)
+	db.SetMaxIdleConns(2)
+	db.SetMaxOpenConns(10)
+	if err := db.Ping(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("connect to PostgreSQL: %w", err)
+	}
+	store := &Store{db: &database{DB: db, driver: "postgres"}, driver: "postgres", ownerID: ownerID}
+	if err := store.verifyPostgresIsolation(); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := store.migratePostgres(); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return store, nil
+}
+
+func (s *Store) verifyPostgresIsolation() error {
+	var configuredOwner string
+	if err := s.db.QueryRow(`SELECT current_setting('app.owner_id')`).Scan(&configuredOwner); err != nil {
+		return fmt.Errorf("verify PostgreSQL owner setting: %w", err)
+	}
+	if configuredOwner != s.ownerID {
+		return fmt.Errorf("PostgreSQL owner setting does not match configured owner")
+	}
+	var superuser, bypassRLS bool
+	if err := s.db.QueryRow(`SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user`).Scan(&superuser, &bypassRLS); err != nil {
+		return fmt.Errorf("inspect PostgreSQL application role: %w", err)
+	}
+	if superuser || bypassRLS {
+		return fmt.Errorf("PostgreSQL application role must not be a superuser or have BYPASSRLS")
+	}
+	return nil
+}
+
 func (s *Store) Ping() error {
 	return s.db.Ping()
+}
+
+func (s *Store) insertID(query string, args ...any) (int64, error) {
+	if s.driver == "postgres" {
+		var id int64
+		if err := s.db.QueryRow(query+" RETURNING id", args...).Scan(&id); err != nil {
+			return 0, err
+		}
+		return id, nil
+	}
+	result, err := s.db.Exec(query, args...)
+	if err != nil {
+		return 0, err
+	}
+	return result.LastInsertId()
 }
 
 func (s *Store) migrate() error {
@@ -152,10 +257,15 @@ func (s *Store) migrate() error {
 	// These must run before the index creation below
 	s.db.Exec(`ALTER TABLE removal_requests ADD COLUMN pipeline_status TEXT DEFAULT 'email_sent'`)
 	s.db.Exec(`ALTER TABLE pending_tasks ADD COLUMN opened_at DATETIME`)
+	for _, table := range []string{"removal_requests", "broker_responses", "pending_tasks", "exposure_checks", "broker_validations", "account_inventory"} {
+		s.db.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN owner_id TEXT NOT NULL DEFAULT 'local'`, table))
+	}
+	s.db.Exec(`ALTER TABLE broker_responses ADD COLUMN email_body TEXT`)
 
 	query := `
 	CREATE TABLE IF NOT EXISTS removal_requests (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		owner_id TEXT NOT NULL DEFAULT 'local',
 		broker_id TEXT NOT NULL,
 		broker_name TEXT NOT NULL,
 		email TEXT NOT NULL,
@@ -176,11 +286,13 @@ func (s *Store) migrate() error {
 	-- Broker responses table (stores classified email responses)
 	CREATE TABLE IF NOT EXISTS broker_responses (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		owner_id TEXT NOT NULL DEFAULT 'local',
 		broker_id TEXT NOT NULL,
 		broker_name TEXT NOT NULL,
 		response_type TEXT NOT NULL,
 		email_from TEXT,
 		email_subject TEXT,
+		email_body TEXT,
 		form_url TEXT,
 		confirm_url TEXT,
 		confidence REAL,
@@ -197,6 +309,7 @@ func (s *Store) migrate() error {
 	-- Pending tasks table (for CAPTCHAs, manual forms, etc.)
 	CREATE TABLE IF NOT EXISTS pending_tasks (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		owner_id TEXT NOT NULL DEFAULT 'local',
 		broker_id TEXT NOT NULL,
 		broker_name TEXT NOT NULL,
 		task_type TEXT NOT NULL,
@@ -217,6 +330,7 @@ func (s *Store) migrate() error {
 	-- Exposure checks retain discovery and recurring verification evidence.
 	CREATE TABLE IF NOT EXISTS exposure_checks (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		owner_id TEXT NOT NULL DEFAULT 'local',
 		broker_id TEXT NOT NULL,
 		broker_name TEXT NOT NULL,
 		status TEXT NOT NULL,
@@ -234,6 +348,7 @@ func (s *Store) migrate() error {
 
 	CREATE TABLE IF NOT EXISTS broker_validations (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		owner_id TEXT NOT NULL DEFAULT 'local',
 		broker_id TEXT NOT NULL,
 		website_valid INTEGER DEFAULT 0,
 		website_status_code INTEGER DEFAULT 0,
@@ -248,6 +363,7 @@ func (s *Store) migrate() error {
 
 	CREATE TABLE IF NOT EXISTS account_inventory (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		owner_id TEXT NOT NULL DEFAULT 'local',
 		service TEXT NOT NULL,
 		login_url TEXT NOT NULL,
 		username TEXT NOT NULL DEFAULT '',
@@ -257,6 +373,7 @@ func (s *Store) migrate() error {
 		imported_at DATETIME NOT NULL,
 		UNIQUE(login_url, username)
 	);
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_owner_login ON account_inventory(owner_id, login_url, username);
 	CREATE INDEX IF NOT EXISTS idx_ai_status ON account_inventory(status);
 	`
 
@@ -274,7 +391,7 @@ func (s *Store) Add(record *Record) error {
 	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
-	result, err := s.db.Exec(query,
+	id, err := s.insertID(query,
 		record.BrokerID,
 		record.BrokerName,
 		record.Email,
@@ -287,11 +404,6 @@ func (s *Store) Add(record *Record) error {
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert record: %w", err)
-	}
-
-	id, err := result.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("failed to get last insert id: %w", err)
 	}
 
 	record.ID = id
@@ -429,18 +541,13 @@ func (s *Store) AddBrokerResponse(resp *BrokerResponse) error {
 		needsReview = 1
 	}
 
-	result, err := s.db.Exec(query,
+	id, err := s.insertID(query,
 		resp.BrokerID, resp.BrokerName, resp.ResponseType, resp.EmailFrom, resp.EmailSubject, resp.EmailBody,
 		resp.FormURL, resp.ConfirmURL, resp.Confidence, needsReview,
 		resp.ReceivedAt, time.Now(), time.Now(),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert broker response: %w", err)
-	}
-
-	id, err := result.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("failed to get last insert id: %w", err)
 	}
 	resp.ID = id
 	return nil
@@ -783,17 +890,12 @@ func (s *Store) AddPendingTask(task *PendingTask) error {
 	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
-	result, err := s.db.Exec(query,
+	id, err := s.insertID(query,
 		task.BrokerID, task.BrokerName, task.TaskType, task.FormURL, task.ScreenshotPath,
 		task.BrowserState, task.Notes, "pending", time.Now(),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert pending task: %w", err)
-	}
-
-	id, err := result.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("failed to get last insert id: %w", err)
 	}
 	task.ID = id
 	return nil

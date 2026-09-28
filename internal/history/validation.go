@@ -22,15 +22,15 @@ func (s *Store) AddBrokerValidation(v *BrokerValidation) error {
 	if v.CheckedAt.IsZero() {
 		v.CheckedAt = time.Now().UTC()
 	}
-	result, err := s.db.Exec(`INSERT INTO broker_validations
+	id, err := s.insertID(`INSERT INTO broker_validations
 		(broker_id, website_valid, website_status_code, optout_valid, optout_status_code, email_domain_valid, error, checked_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, v.BrokerID, v.WebsiteValid, v.WebsiteStatusCode,
 		v.OptOutValid, v.OptOutStatusCode, v.EmailDomainValid, v.Error, v.CheckedAt)
 	if err != nil {
 		return fmt.Errorf("failed to insert broker validation: %w", err)
 	}
-	v.ID, err = result.LastInsertId()
-	return err
+	v.ID = id
+	return nil
 }
 
 func scanValidation(scanner interface{ Scan(...any) error }) (*BrokerValidation, error) {

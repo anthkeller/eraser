@@ -12,11 +12,10 @@ fixes and broker workflows do not split into separate codebases.
 | Cloud | Hosted | The official subscription service |
 | Commercial | Self-hosted | Licensed internal or partner deployment |
 
-Every edition is single-user today. The internal `owner_id` setting reserves the
-identity that future storage and job interfaces will use, without exposing
-family roles or an RBAC interface. It does not yet enforce database-level tenant
-filtering. Hosted mode must not
-be enabled until authentication and owner-scoped storage are implemented.
+Every account represents one person and has no family roles or RBAC interface.
+Hosted deployments bind a verified OIDC subject to an owner ID. PostgreSQL
+enforces that owner at the database layer. The self-hosted SQLite database
+remains a single-user store.
 
 ## Runtime configuration
 
@@ -30,6 +29,7 @@ be enabled until authentication and owner-scoped storage are implemented.
 | `ERASER_OWNER_ID` | `local` | Internal owner boundary; never returned publicly |
 | `ERASER_AUTH_ISSUER` | empty | Hosted OIDC issuer URL |
 | `ERASER_AUTH_AUDIENCE` | empty | Hosted OIDC client ID or token audience |
+| `ERASER_DATABASE_URL` | empty | PostgreSQL connection URL for hosted storage |
 
 Hosted mode rejects the community edition and rejects an HTTP public URL. When
 the public URL uses HTTPS, Eraser marks CSRF cookies secure and trusts only that
@@ -40,6 +40,18 @@ provider. Every route except health, readiness, and public system metadata
 requires a verified bearer token. Its `sub` claim must exactly match
 `ERASER_OWNER_ID`. This creates a strong single-subscriber deployment boundary
 without presenting family roles or RBAC.
+
+Hosted mode requires PostgreSQL. Eraser attaches `ERASER_OWNER_ID` to every
+pooled database connection and enables forced row-level security on all
+user-controlled tables. Inserts receive the connection owner automatically.
+Reads, updates, and deletes are filtered by PostgreSQL even when application SQL
+does not include an owner predicate. Eraser refuses database roles with
+`SUPERUSER` or `BYPASSRLS`, because either privilege would defeat this boundary.
+
+The application role must own the Eraser tables so it can run migrations and
+manage policies. It must not be a PostgreSQL superuser. On AWS, place the full
+RDS URL in Secrets Manager and inject it as `ERASER_DATABASE_URL`; do not bake it
+into the image or commit it to an environment file.
 
 Operational endpoints:
 
@@ -52,17 +64,17 @@ Operational endpoints:
 
 ## Hosted target architecture
 
-The current foundation includes OIDC verification and a queue interface with an
-owner ID on every job. The in-memory implementation supports self-hosted
-operation. A future SQS implementation can satisfy the same interface.
+The current foundation includes OIDC verification, PostgreSQL row-level owner
+isolation, and a queue interface with an owner ID on every job. The in-memory
+implementation supports self-hosted operation. A future SQS implementation can
+satisfy the same interface.
 
 The next shared-service milestone should add these replaceable interfaces:
 
-1. PostgreSQL storage with an owner ID on every user-controlled record.
-2. An SQS queue implementation for scan, validation, email, and recurring jobs.
-3. Object storage for encrypted evidence with short retention periods.
-4. Provider interfaces for email, notifications, billing, and entitlements.
-5. An OIDC authorization-code flow for the browser UI. The current hosted
+1. An SQS queue implementation for scan, validation, email, and recurring jobs.
+2. Object storage for encrypted evidence with short retention periods.
+3. Provider interfaces for email, notifications, billing, and entitlements.
+4. An OIDC authorization-code flow for the browser UI. The current hosted
    interface expects a bearer token supplied by a mobile app, SPA, or gateway.
 
 An AWS deployment can map these interfaces to Cognito, RDS PostgreSQL, SQS,

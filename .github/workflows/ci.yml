@@ -11,12 +11,32 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      ERASER_TEST_POSTGRES_URL: postgres://eraser_app:eraser_test_password@localhost:5432/eraser_test?sslmode=disable
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
+      - name: Create restricted PostgreSQL application role
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -U postgres -d postgres -c "CREATE ROLE eraser_app LOGIN PASSWORD 'eraser_test_password' NOSUPERUSER NOBYPASSRLS"
+          psql -h localhost -U postgres -d postgres -c "CREATE DATABASE eraser_test OWNER eraser_app"
       - run: go test ./...
       - run: go vet ./...
       - name: Validate browser extension

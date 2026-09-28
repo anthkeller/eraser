@@ -10,7 +10,7 @@ func TestHostedCommunityIsRejected(t *testing.T) {
 }
 
 func TestHostedDeploymentRequiresHTTPSWhenPublicURLIsSet(t *testing.T) {
-	settings := Settings{Edition: EditionCloud, Deployment: DeploymentHosted, BindAddress: "0.0.0.0", OwnerID: "user", PublicURL: "http://eraser.example", AuthIssuer: "https://id.example", AuthAudience: "eraser"}
+	settings := Settings{Edition: EditionCloud, Deployment: DeploymentHosted, BindAddress: "0.0.0.0", OwnerID: "user", PublicURL: "http://eraser.example", AuthIssuer: "https://id.example", AuthAudience: "eraser", DatabaseURL: "postgres://eraser@example/eraser"}
 	if err := settings.Validate(); err == nil {
 		t.Fatal("expected an insecure hosted public URL to be rejected")
 	}
@@ -29,6 +29,11 @@ func TestHostedDeploymentRequiresOIDCAndExplicitOwner(t *testing.T) {
 	if err := settings.Validate(); err == nil {
 		t.Fatal("expected missing OIDC configuration to be rejected")
 	}
+	settings.AuthIssuer = "https://id.example"
+	settings.AuthAudience = "eraser"
+	if err := settings.Validate(); err == nil {
+		t.Fatal("expected missing PostgreSQL configuration to be rejected")
+	}
 }
 
 func TestPublicInfoDoesNotExposeOwnerID(t *testing.T) {
@@ -36,5 +41,15 @@ func TestPublicInfoDoesNotExposeOwnerID(t *testing.T) {
 	info := settings.Info()
 	if info.Capabilities.ManagedService || !info.Capabilities.SelfHosting || !info.Capabilities.SingleUser {
 		t.Fatalf("unexpected capabilities: %+v", info.Capabilities)
+	}
+}
+
+func TestPostgresRequiresExplicitOwnerInEveryDeployment(t *testing.T) {
+	settings := Settings{
+		Edition: EditionCommercial, Deployment: DeploymentSelfHosted,
+		BindAddress: "127.0.0.1", OwnerID: "local", DatabaseURL: "postgres://eraser@example/eraser",
+	}
+	if err := settings.Validate(); err == nil {
+		t.Fatal("expected PostgreSQL with the default owner to be rejected")
 	}
 }

@@ -39,6 +39,7 @@ type Settings struct {
 	OwnerID      string
 	AuthIssuer   string
 	AuthAudience string
+	DatabaseURL  string
 }
 
 type PublicInfo struct {
@@ -58,6 +59,7 @@ func LoadFromEnv() (Settings, error) {
 		OwnerID:      valueOrDefault("ERASER_OWNER_ID", "local"),
 		AuthIssuer:   strings.TrimSpace(os.Getenv("ERASER_AUTH_ISSUER")),
 		AuthAudience: strings.TrimSpace(os.Getenv("ERASER_AUTH_AUDIENCE")),
+		DatabaseURL:  strings.TrimSpace(os.Getenv("ERASER_DATABASE_URL")),
 		OpenBrowser:  true,
 	}
 	if raw, ok := os.LookupEnv("ERASER_OPEN_BROWSER"); ok {
@@ -93,12 +95,18 @@ func (s Settings) Validate() error {
 	if strings.TrimSpace(s.OwnerID) == "" {
 		return fmt.Errorf("owner ID cannot be empty")
 	}
+	if s.DatabaseURL != "" && s.OwnerID == "local" {
+		return fmt.Errorf("PostgreSQL deployments require an explicit ERASER_OWNER_ID")
+	}
 	if s.Deployment == DeploymentHosted {
 		if s.OwnerID == "local" {
 			return fmt.Errorf("hosted deployments require an explicit ERASER_OWNER_ID matching the OIDC subject")
 		}
 		if s.AuthIssuer == "" || s.AuthAudience == "" {
 			return fmt.Errorf("hosted deployments require ERASER_AUTH_ISSUER and ERASER_AUTH_AUDIENCE")
+		}
+		if s.DatabaseURL == "" {
+			return fmt.Errorf("hosted deployments require ERASER_DATABASE_URL")
 		}
 	}
 	if s.PublicURL != "" {

@@ -10,7 +10,7 @@ import (
 func (s *Store) UpsertAccount(account accounts.Account) error {
 	_, err := s.db.Exec(`INSERT INTO account_inventory (service, login_url, username, source, status, imported_at)
 		VALUES (?, ?, ?, ?, 'pending', ?)
-		ON CONFLICT(login_url, username) DO UPDATE SET service=excluded.service, source=excluded.source,
+		ON CONFLICT(owner_id, login_url, username) DO UPDATE SET service=excluded.service, source=excluded.source,
 		imported_at=excluded.imported_at`, account.Service, account.LoginURL, account.Username, account.Source, time.Now().UTC())
 	if err != nil {
 		return fmt.Errorf("failed to store account inventory: %w", err)

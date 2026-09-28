@@ -107,9 +107,10 @@ internal owner identifier.
 
 Hosted mode now verifies OIDC bearer tokens and restricts the deployment to one
 configured token subject. It rejects insecure public URLs and ownerless jobs.
-The included in-memory queue provides the same interface a future SQS worker
-will implement. A shared multi-user service still requires owner-scoped
-PostgreSQL storage and a browser authorization-code flow. See
+PostgreSQL storage uses forced row-level security tied to the verified owner
+subject, and the service rejects database roles capable of bypassing it. The
+included in-memory queue provides the same interface a future SQS worker will
+implement. A shared service still needs a browser authorization-code flow. See
 [`docs/commercialization.md`](docs/commercialization.md) for configuration,
 deployment boundaries, and the licensing review required before restricting
 third-party hosted resale.

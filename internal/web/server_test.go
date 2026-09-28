@@ -97,6 +97,7 @@ func TestHostedServerRequiresVerifiedConfiguredOwner(t *testing.T) {
 		Edition: product.EditionCloud, Deployment: product.DeploymentHosted,
 		BindAddress: "127.0.0.1", PublicURL: "https://eraser.example",
 		OwnerID: "owner-1", AuthIssuer: "https://id.example", AuthAudience: "eraser",
+		DatabaseURL: "postgres://eraser@example/eraser",
 	}
 	server, err := NewServer(8080, &config.Config{}, "", &broker.BrokerDatabase{}, store, engine,
 		WithProductSettings(settings), WithAuthVerifier(fixedVerifier{subject: "owner-1"}))

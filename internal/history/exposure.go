@@ -54,15 +54,15 @@ func (s *Store) AddExposureCheck(check *ExposureCheck) error {
 	if !check.NextCheckAt.IsZero() {
 		next = check.NextCheckAt
 	}
-	result, err := s.db.Exec(`INSERT INTO exposure_checks
+	id, err := s.insertID(`INSERT INTO exposure_checks
 		(broker_id, broker_name, status, record_url, evidence, confidence, error, checked_at, next_check_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, check.BrokerID, check.BrokerName, check.Status,
 		check.RecordURL, check.Evidence, check.Confidence, check.Error, check.CheckedAt, next)
 	if err != nil {
 		return fmt.Errorf("failed to insert exposure check: %w", err)
 	}
-	check.ID, err = result.LastInsertId()
-	return err
+	check.ID = id
+	return nil
 }
 
 func scanExposure(scanner interface{ Scan(...any) error }) (*ExposureCheck, error) {
