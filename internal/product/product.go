@@ -1,6 +1,7 @@
 package product
 
 import (
+	"encoding/base64"
 	"fmt"
 	"net/url"
 	"os"
@@ -31,15 +32,17 @@ type Capabilities struct {
 }
 
 type Settings struct {
-	Edition      Edition
-	Deployment   Deployment
-	BindAddress  string
-	PublicURL    string
-	OpenBrowser  bool
-	OwnerID      string
-	AuthIssuer   string
-	AuthAudience string
-	DatabaseURL  string
+	Edition          Edition
+	Deployment       Deployment
+	BindAddress      string
+	PublicURL        string
+	OpenBrowser      bool
+	OwnerID          string
+	AuthIssuer       string
+	AuthAudience     string
+	AuthClientSecret string
+	SessionKey       string
+	DatabaseURL      string
 }
 
 type PublicInfo struct {
@@ -52,15 +55,17 @@ type PublicInfo struct {
 
 func LoadFromEnv() (Settings, error) {
 	settings := Settings{
-		Edition:      Edition(valueOrDefault("ERASER_EDITION", string(EditionCommunity))),
-		Deployment:   Deployment(valueOrDefault("ERASER_DEPLOYMENT", string(DeploymentSelfHosted))),
-		BindAddress:  valueOrDefault("ERASER_BIND", "127.0.0.1"),
-		PublicURL:    strings.TrimSpace(os.Getenv("ERASER_PUBLIC_URL")),
-		OwnerID:      valueOrDefault("ERASER_OWNER_ID", "local"),
-		AuthIssuer:   strings.TrimSpace(os.Getenv("ERASER_AUTH_ISSUER")),
-		AuthAudience: strings.TrimSpace(os.Getenv("ERASER_AUTH_AUDIENCE")),
-		DatabaseURL:  strings.TrimSpace(os.Getenv("ERASER_DATABASE_URL")),
-		OpenBrowser:  true,
+		Edition:          Edition(valueOrDefault("ERASER_EDITION", string(EditionCommunity))),
+		Deployment:       Deployment(valueOrDefault("ERASER_DEPLOYMENT", string(DeploymentSelfHosted))),
+		BindAddress:      valueOrDefault("ERASER_BIND", "127.0.0.1"),
+		PublicURL:        strings.TrimSpace(os.Getenv("ERASER_PUBLIC_URL")),
+		OwnerID:          valueOrDefault("ERASER_OWNER_ID", "local"),
+		AuthIssuer:       strings.TrimSpace(os.Getenv("ERASER_AUTH_ISSUER")),
+		AuthAudience:     strings.TrimSpace(os.Getenv("ERASER_AUTH_AUDIENCE")),
+		AuthClientSecret: strings.TrimSpace(os.Getenv("ERASER_AUTH_CLIENT_SECRET")),
+		SessionKey:       strings.TrimSpace(os.Getenv("ERASER_SESSION_KEY")),
+		DatabaseURL:      strings.TrimSpace(os.Getenv("ERASER_DATABASE_URL")),
+		OpenBrowser:      true,
 	}
 	if raw, ok := os.LookupEnv("ERASER_OPEN_BROWSER"); ok {
 		value, err := strconv.ParseBool(raw)
@@ -102,11 +107,18 @@ func (s Settings) Validate() error {
 		if s.OwnerID == "local" {
 			return fmt.Errorf("hosted deployments require an explicit ERASER_OWNER_ID matching the OIDC subject")
 		}
-		if s.AuthIssuer == "" || s.AuthAudience == "" {
-			return fmt.Errorf("hosted deployments require ERASER_AUTH_ISSUER and ERASER_AUTH_AUDIENCE")
+		if s.AuthIssuer == "" || s.AuthAudience == "" || s.AuthClientSecret == "" {
+			return fmt.Errorf("hosted deployments require ERASER_AUTH_ISSUER, ERASER_AUTH_AUDIENCE, and ERASER_AUTH_CLIENT_SECRET")
+		}
+		key, err := base64.RawURLEncoding.DecodeString(s.SessionKey)
+		if err != nil || len(key) != 64 {
+			return fmt.Errorf("hosted deployments require ERASER_SESSION_KEY as 64 random bytes encoded with unpadded base64url")
 		}
 		if s.DatabaseURL == "" {
 			return fmt.Errorf("hosted deployments require ERASER_DATABASE_URL")
+		}
+		if s.PublicURL == "" {
+			return fmt.Errorf("hosted deployments require ERASER_PUBLIC_URL")
 		}
 	}
 	if s.PublicURL != "" {

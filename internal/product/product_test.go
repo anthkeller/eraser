@@ -1,6 +1,13 @@
 package product
 
-import "testing"
+import (
+	"encoding/base64"
+	"testing"
+)
+
+func hostedSettings() Settings {
+	return Settings{Edition: EditionCloud, Deployment: DeploymentHosted, BindAddress: "0.0.0.0", OwnerID: "user", PublicURL: "https://eraser.example", AuthIssuer: "https://id.example", AuthAudience: "eraser", AuthClientSecret: "secret", SessionKey: base64.RawURLEncoding.EncodeToString(make([]byte, 64)), DatabaseURL: "postgres://eraser@example/eraser"}
+}
 
 func TestHostedCommunityIsRejected(t *testing.T) {
 	settings := Settings{Edition: EditionCommunity, Deployment: DeploymentHosted, BindAddress: "0.0.0.0", OwnerID: "user"}
@@ -10,7 +17,8 @@ func TestHostedCommunityIsRejected(t *testing.T) {
 }
 
 func TestHostedDeploymentRequiresHTTPSWhenPublicURLIsSet(t *testing.T) {
-	settings := Settings{Edition: EditionCloud, Deployment: DeploymentHosted, BindAddress: "0.0.0.0", OwnerID: "user", PublicURL: "http://eraser.example", AuthIssuer: "https://id.example", AuthAudience: "eraser", DatabaseURL: "postgres://eraser@example/eraser"}
+	settings := hostedSettings()
+	settings.PublicURL = "http://eraser.example"
 	if err := settings.Validate(); err == nil {
 		t.Fatal("expected an insecure hosted public URL to be rejected")
 	}
@@ -31,6 +39,8 @@ func TestHostedDeploymentRequiresOIDCAndExplicitOwner(t *testing.T) {
 	}
 	settings.AuthIssuer = "https://id.example"
 	settings.AuthAudience = "eraser"
+	settings.AuthClientSecret = "secret"
+	settings.SessionKey = base64.RawURLEncoding.EncodeToString(make([]byte, 64))
 	if err := settings.Validate(); err == nil {
 		t.Fatal("expected missing PostgreSQL configuration to be rejected")
 	}

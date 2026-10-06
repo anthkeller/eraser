@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -45,20 +46,33 @@ func (v *OIDCVerifier) Verify(ctx context.Context, raw string) (Principal, error
 	return Principal{Subject: token.Subject}, nil
 }
 
-func Middleware(verifier Verifier, requiredSubject string, publicPaths map[string]struct{}) func(http.Handler) http.Handler {
+func Middleware(verifier Verifier, requiredSubject string, publicPaths map[string]struct{}, browserSessions ...BrowserSession) func(http.Handler) http.Handler {
+	var browser BrowserSession
+	if len(browserSessions) > 0 {
+		browser = browserSessions[0]
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if _, public := publicPaths[r.URL.Path]; public {
 				next.ServeHTTP(w, r)
 				return
 			}
-			raw, err := bearerToken(r.Header.Get("Authorization"))
-			if err != nil {
-				writeUnauthorized(w)
-				return
+			principal, ok := Principal{}, false
+			if browser != nil {
+				principal, ok = browser.Principal(r)
 			}
-			principal, err := verifier.Verify(r.Context(), raw)
-			if err != nil || !sameSubject(principal.Subject, requiredSubject) {
+			if !ok {
+				raw, err := bearerToken(r.Header.Get("Authorization"))
+				if err == nil {
+					principal, err = verifier.Verify(r.Context(), raw)
+					ok = err == nil
+				}
+			}
+			if !ok || !sameSubject(principal.Subject, requiredSubject) {
+				if browser != nil && !strings.HasPrefix(r.URL.Path, "/api/") && !strings.Contains(r.Header.Get("Accept"), "application/json") {
+					http.Redirect(w, r, "/auth/login?return_to="+url.QueryEscape(r.URL.RequestURI()), http.StatusFound)
+					return
+				}
 				writeUnauthorized(w)
 				return
 			}

@@ -29,17 +29,20 @@ remains a single-user store.
 | `ERASER_OWNER_ID` | `local` | Internal owner boundary; never returned publicly |
 | `ERASER_AUTH_ISSUER` | empty | Hosted OIDC issuer URL |
 | `ERASER_AUTH_AUDIENCE` | empty | Hosted OIDC client ID or token audience |
+| `ERASER_AUTH_CLIENT_SECRET` | empty | Hosted OIDC confidential-client secret |
+| `ERASER_SESSION_KEY` | empty | 64 random bytes encoded as unpadded base64url |
 | `ERASER_DATABASE_URL` | empty | PostgreSQL connection URL for hosted storage |
 
 Hosted mode rejects the community edition and rejects an HTTP public URL. When
 the public URL uses HTTPS, Eraser marks CSRF cookies secure and trusts only that
 URL's host in addition to local development origins.
 
-Hosted mode also requires a non-default owner ID and a discoverable OIDC
-provider. Every route except health, readiness, and public system metadata
-requires a verified bearer token. Its `sub` claim must exactly match
-`ERASER_OWNER_ID`. This creates a strong single-subscriber deployment boundary
-without presenting family roles or RBAC.
+Hosted mode also requires a non-default owner ID, an HTTPS public URL, and a
+discoverable OIDC provider. Register `<ERASER_PUBLIC_URL>/auth/callback` as an
+allowed redirect URI. Generate the session key with
+`openssl rand -base64 64 | tr '+/' '-_' | tr -d '=\n'`. Its `sub` claim must
+exactly match `ERASER_OWNER_ID`. Store the OIDC client secret and session key in
+AWS Secrets Manager or an equivalent secret store.
 
 Hosted mode requires PostgreSQL. Eraser attaches `ERASER_OWNER_ID` to every
 pooled database connection and enables forced row-level security on all
@@ -59,8 +62,12 @@ Operational endpoints:
 - `GET /readyz` verifies that the application database responds.
 - `GET /api/v1/system` returns non-secret edition, version, deployment, and
   capability metadata for web and mobile clients.
-- `GET /api/v1/me` returns the authenticated subject and is protected in hosted
-  mode.
+- `GET /auth/login` starts OIDC Authorization Code + PKCE for the browser UI.
+- `GET /auth/callback` creates an encrypted, signed, eight-hour `HttpOnly`,
+  `Secure`, `SameSite=Lax` session after verifying the ID token and owner.
+- `POST /auth/logout` clears the browser session and is CSRF protected.
+- `GET /api/v1/me` returns the authenticated subject. Hosted API clients may
+  continue to use an OIDC bearer token.
 
 ## Hosted target architecture
 
@@ -74,8 +81,8 @@ The next shared-service milestone should add these replaceable interfaces:
 1. An SQS queue implementation for scan, validation, email, and recurring jobs.
 2. Object storage for encrypted evidence with short retention periods.
 3. Provider interfaces for email, notifications, billing, and entitlements.
-4. An OIDC authorization-code flow for the browser UI. The current hosted
-   interface expects a bearer token supplied by a mobile app, SPA, or gateway.
+4. Durable server-side session revocation if immediate logout across stolen or
+   copied cookies becomes a product requirement.
 
 An AWS deployment can map these interfaces to Cognito, RDS PostgreSQL, SQS,
 S3/KMS, EventBridge, SES, Secrets Manager, WAF, and ECS Fargate. Self-hosting can

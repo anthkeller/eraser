@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -97,6 +98,7 @@ func TestHostedServerRequiresVerifiedConfiguredOwner(t *testing.T) {
 		Edition: product.EditionCloud, Deployment: product.DeploymentHosted,
 		BindAddress: "127.0.0.1", PublicURL: "https://eraser.example",
 		OwnerID: "owner-1", AuthIssuer: "https://id.example", AuthAudience: "eraser",
+		AuthClientSecret: "secret", SessionKey: base64.RawURLEncoding.EncodeToString(make([]byte, 64)),
 		DatabaseURL: "postgres://eraser@example/eraser",
 	}
 	server, err := NewServer(8080, &config.Config{}, "", &broker.BrokerDatabase{}, store, engine,

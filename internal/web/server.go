@@ -125,6 +125,7 @@ type Server struct {
 	jobPersistence *JobPersistence
 	product        product.Settings
 	authVerifier   auth.Verifier
+	browserSession auth.BrowserSession
 }
 
 func NewServer(port int, cfg *config.Config, configPath string, brokerDB *broker.BrokerDatabase, historyStore *history.Store, tmplEngine *emaTemplate.Engine, options ...ServerOption) (*Server, error) {
@@ -169,6 +170,11 @@ func NewServer(port int, cfg *config.Config, configPath string, brokerDB *broker
 			return nil, err
 		}
 		s.authVerifier = verifier
+		browserSession, err := auth.NewBrowserSession(ctx, s.product.AuthIssuer, s.product.AuthAudience, s.product.AuthClientSecret, s.product.PublicURL, s.product.OwnerID, s.product.SessionKey)
+		if err != nil {
+			return nil, err
+		}
+		s.browserSession = browserSession
 	}
 
 	tmpl, err := s.parseTemplates()
@@ -187,6 +193,10 @@ func WithProductSettings(settings product.Settings) ServerOption {
 
 func WithAuthVerifier(verifier auth.Verifier) ServerOption {
 	return func(server *Server) { server.authVerifier = verifier }
+}
+
+func WithBrowserSession(session auth.BrowserSession) ServerOption {
+	return func(server *Server) { server.browserSession = session }
 }
 
 // parseTemplates loads and parses all HTML templates
@@ -421,9 +431,9 @@ func (s *Server) setupRouter() *chi.Mux {
 	r.Use(securityHeaders)
 	if s.product.Deployment == product.DeploymentHosted {
 		publicPaths := map[string]struct{}{
-			"/healthz": {}, "/readyz": {}, "/api/v1/system": {},
+			"/healthz": {}, "/readyz": {}, "/api/v1/system": {}, "/auth/login": {}, "/auth/callback": {},
 		}
-		r.Use(auth.Middleware(s.authVerifier, s.product.OwnerID, publicPaths))
+		r.Use(auth.Middleware(s.authVerifier, s.product.OwnerID, publicPaths, s.browserSession))
 	}
 
 	// Public URL controls secure cookies and adds its host to trusted origins.
@@ -447,6 +457,11 @@ func (s *Server) setupRouter() *chi.Mux {
 	r.Get("/readyz", s.handleReady)
 	r.Get("/api/v1/system", s.handleAPISystem)
 	r.Get("/api/v1/me", s.handleAPIMe)
+	if s.product.Deployment == product.DeploymentHosted && s.browserSession != nil {
+		r.Get("/auth/login", s.browserSession.Login)
+		r.Get("/auth/callback", s.browserSession.Callback)
+		r.Post("/auth/logout", s.browserSession.Logout)
+	}
 
 	// Routes
 	r.Get("/", s.handleDashboard)

@@ -105,12 +105,12 @@ The versioned `GET /api/v1/system` endpoint allows future mobile, web, and
 extension clients to discover non-secret capabilities without learning the
 internal owner identifier.
 
-Hosted mode now verifies OIDC bearer tokens and restricts the deployment to one
-configured token subject. It rejects insecure public URLs and ownerless jobs.
-PostgreSQL storage uses forced row-level security tied to the verified owner
-subject, and the service rejects database roles capable of bypassing it. The
-included in-memory queue provides the same interface a future SQS worker will
-implement. A shared service still needs a browser authorization-code flow. See
+Hosted mode supports OIDC Authorization Code + PKCE browser login and bearer
+tokens, and restricts the deployment to one configured subject. It rejects
+insecure public URLs and ownerless jobs. PostgreSQL storage uses forced
+row-level security tied to the verified owner subject, and the service rejects
+database roles capable of bypassing it. The included in-memory queue provides
+the same interface a future SQS worker will implement. See
 [`docs/commercialization.md`](docs/commercialization.md) for configuration,
 deployment boundaries, and the licensing review required before restricting
 third-party hosted resale.
